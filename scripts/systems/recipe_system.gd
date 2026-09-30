@@ -8,6 +8,9 @@ extends RefCounted
 signal recipe_created(recipe_id: String)
 signal recipe_updated(recipe_id: String)
 
+## Значение исполнения у рецепта, который ещё ни разу не готовили.
+const NO_EXECUTION := -1.0
+
 var catalog: IngredientCatalog
 var config: ScoringConfig
 var _state: Node
@@ -52,7 +55,7 @@ func evaluate(selection: Dictionary, modifiers: Array) -> Dictionary:
 
 
 ## Сохраняет микс в книгу. Если такой рецепт уже есть, ничего не меняется (is_new == false):
-## счётчик использований растёт только через record_result (приготовление для гостя).
+## счётчик использований растёт только через record_preparation (приготовление).
 ## {"ok", "error"?, "is_new", "recipe_id", "recipe", "is_secret", "secret_message"}
 func commit(selection: Dictionary, modifiers: Array, custom_name: String = "") -> Dictionary:
 	var evaluation := evaluate(selection, modifiers)
@@ -75,6 +78,8 @@ func commit(selection: Dictionary, modifiers: Array, custom_name: String = "") -
 			"best_score": scoring["quality"],
 			"last_score": scoring["quality"],
 			"times_used": 0,
+			"best_execution": NO_EXECUTION,
+			"last_execution": NO_EXECUTION,
 			"created_seq": _state.next_recipe_seq(),
 			"secret_id": scoring["secret_id"],
 		}
@@ -104,14 +109,15 @@ func rename(recipe_id: String, new_name: String) -> bool:
 	return true
 
 
-## Записывает приготовление рецепта для гостя: +1 к использованиям, последний/лучший результат (M4+).
-func record_result(recipe_id: String, score: float) -> bool:
+## Записывает приготовление рецепта: +1 к использованиям, последнее/лучшее исполнение (ExecutionScore).
+## Качество самого рецепта (best_score/last_score) от приготовления не меняется.
+func record_preparation(recipe_id: String, execution_score: float) -> bool:
 	if not _state.recipes.has(recipe_id):
 		return false
 	var recipe: Dictionary = _state.recipes[recipe_id]
 	recipe["times_used"] = int(recipe["times_used"]) + 1
-	recipe["last_score"] = score
-	recipe["best_score"] = maxf(float(recipe["best_score"]), score)
+	recipe["last_execution"] = execution_score
+	recipe["best_execution"] = maxf(float(recipe.get("best_execution", NO_EXECUTION)), execution_score)
 	recipe["last_used_seq"] = _state.next_recipe_seq()
 	recipe_updated.emit(recipe_id)
 	return true

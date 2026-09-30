@@ -171,7 +171,7 @@ func test_book_query_filter_and_sort() -> void:
 	system.commit({"apple": 1, "vanilla": 1}, [])
 	system.commit({"lemon": 1}, [])
 	var sb := system.commit({"strawberry": 1, "vanilla": 1}, [])
-	system.record_result(sb["recipe_id"], 70.0)
+	system.record_preparation(sb["recipe_id"], 70.0)
 	var all := system.all_recipes()
 	assert_eq(RecipeBookQuery.filter_sort(all, "", RecipeBookQuery.SORT_BEST).size(), 3)
 	assert_eq(RecipeBookQuery.filter_sort(all, "vanilla", RecipeBookQuery.SORT_BEST).size(), 2)
@@ -235,14 +235,21 @@ func test_secret_recipe_cannot_be_renamed() -> void:
 	state.free()
 
 
-func test_record_result_counts_usage() -> void:
+func test_record_preparation_counts_usage() -> void:
 	var state := GameStateScript.new()
 	var system := _system(state)
 	var result := system.commit({"strawberry": 1, "vanilla": 1}, [])
-	assert_eq(system.get_recipe(result["recipe_id"])["times_used"], 0)
-	assert_true(system.record_result(result["recipe_id"], 80.0))
-	assert_eq(system.get_recipe(result["recipe_id"])["times_used"], 1)
-	assert_eq(system.get_recipe(result["recipe_id"])["best_score"], maxf(result["recipe"]["best_score"], 80.0))
+	var recipe: Dictionary = system.get_recipe(result["recipe_id"])
+	assert_eq(recipe["times_used"], 0)
+	assert_eq(recipe["best_execution"], RecipeSystem.NO_EXECUTION)
+	assert_true(system.record_preparation(result["recipe_id"], 80.0))
+	assert_true(system.record_preparation(result["recipe_id"], 60.0))
+	recipe = system.get_recipe(result["recipe_id"])
+	assert_eq(recipe["times_used"], 2)
+	assert_eq(recipe["best_execution"], 80.0)
+	assert_eq(recipe["last_execution"], 60.0)
+	assert_eq(recipe["best_score"], result["recipe"]["best_score"], "качество рецепта не меняется от приготовления")
+	assert_true(not system.record_preparation("missing", 10.0))
 	state.free()
 
 

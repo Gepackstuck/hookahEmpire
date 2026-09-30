@@ -3,14 +3,28 @@
     {
       "id": "denis_arrives",
       "requires_progress": "intro_start",
-      "delay": 2.0,
+      "delay": 1.0,
       "action": "spawn_friend",
       "guest": "friend_denis",
-      "entry_position": [0.3, 7.5],
-      "entry_cell": [1, 7],
-      "stand_cell": [10, 10],
+      "entry_position": [
+        0.3,
+        7.5
+      ],
+      "entry_cell": [
+        1,
+        7
+      ],
+      "stand_cell": [
+        12,
+        10
+      ],
       "dialogue": "friend_denis_intro",
-      "sets_progress": "friend_01_arrives"
+      "sets_progress": "friend_01_arrives",
+      "seat": {
+        "emoji": "🧘‍♂️",
+        "facing": "right",
+        "lift": 10
+      }
     }
   ]
 }

@@ -26,11 +26,13 @@ func update_focus(player_pos: Vector2) -> void:
 	var best: InteractableData = null
 	var best_distance := INF
 	for item in _items:
+		if not item.enabled:
+			continue
 		var distance := item.distance_to(player_pos)
 		if distance <= item.radius and distance < best_distance:
 			best = item
 			best_distance = distance
-	if _focus != null and best != null and best != _focus:
+	if _focus != null and _focus.enabled and best != null and best != _focus:
 		var current_distance := _focus.distance_to(player_pos)
 		if current_distance <= _focus.radius and current_distance <= best_distance + FOCUS_HYSTERESIS:
 			best = _focus

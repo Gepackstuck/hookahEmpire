@@ -15,7 +15,7 @@ func test_garage_scene_builds_world() -> void:
 	await tree.process_frame
 	var entities := garage.get_node("%Entities")
 	# 6 объектов (включая книгу рецептов) + игрок.
-	assert_eq(entities.get_child_count(), 7, "ожидалось 6 объектов и игрок")
+	assert_eq(entities.get_child_count(), 9, "ожидалось 8 объектов и игрок")
 	var player_found := false
 	for child in entities.get_children():
 		if child is Player:
@@ -33,7 +33,7 @@ func test_friend_can_be_spawned() -> void:
 	var guest := GuestCatalog.load_guest("friend_denis")
 	assert_true(garage.spawn_friend(guest, Vector2(0.3, 7.5), Vector2i(1, 7), Vector2i(9, 9), "friend_denis_intro"))
 	var entities := garage.get_node("%Entities")
-	assert_eq(entities.get_child_count(), 8, "ожидались 6 объектов, игрок и друг")
+	assert_eq(entities.get_child_count(), 10, "ожидались 8 объектов, игрок и друг")
 	tree.root.remove_child(garage)
 	garage.free()
 

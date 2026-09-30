@@ -182,15 +182,21 @@ func _show_detail(recipe: Dictionary) -> void:
 		parts.append("Ледяная нотка ❄️")
 	_composition.text = " · ".join(parts)
 	var best := float(recipe["best_score"])
-	var last := float(recipe["last_score"])
-	_stats.text = "Лучший: %.1f (%s)\nПоследний: %.1f (%s)\nИспользован раз: %d" % [
+	_stats.text = "Качество: %.1f (%s)\nИсполнение: лучшее %s, последнее %s\nПриготовлен раз: %d" % [
 		best, _recipes.config.band_for(best)["name"],
-		last, _recipes.config.band_for(last)["name"],
+		_execution_text(float(recipe.get("best_execution", RecipeSystem.NO_EXECUTION))),
+		_execution_text(float(recipe.get("last_execution", RecipeSystem.NO_EXECUTION))),
 		int(recipe["times_used"])]
 	_rename_edit.text = ""
 	var secret := str(recipe["secret_id"]) != ""
 	_rename_edit.visible = not secret
 	_rename_button.visible = not secret
+
+
+func _execution_text(score: float) -> String:
+	if score < 0.0:
+		return "—"
+	return "%.1f (%s)" % [score, _recipes.config.band_for(score)["name"]]
 
 
 func _on_rename_pressed() -> void:

@@ -18,10 +18,12 @@ func test_real_layout_is_valid() -> void:
 	var layout := GarageLayout.load_file(LAYOUT_PATH)
 	assert_true(layout.is_valid(), "ошибки: %s" % str(layout.errors))
 	assert_eq(layout.size, Vector2i(20, 15))
+	assert_true(layout.hookah_prep_cell.x >= 0, "нужна клетка у стола для кальянов")
+	assert_true(layout.player_seat_cell.x >= 0, "нужен стул игрока")
 	var ids: Array[String] = []
 	for object in layout.objects:
 		ids.append(object["id"])
-	for required in ["table_test", "hookah_test", "door_main", "crate_test", "lamp_test", "recipe_book"]:
+	for required in ["table_test", "hookah_test", "door_main", "recipe_book", "table_hookah", "chair_denis", "chair_player", "table_guest"]:
 		assert_true(ids.has(required), "нет объекта %s" % required)
 
 
@@ -72,7 +74,11 @@ func test_real_layout_actions_and_rects() -> void:
 	assert_true(not by_id["recipe_book"]["blocks"])
 	assert_eq(by_id["table_test"]["size"], Vector2i(4, 2))
 	assert_true(by_id["recipe_book"]["visual"].get("glow", false))
-	assert_eq(by_id["hookah_test"]["interaction"]["action"], "")
+	assert_eq(by_id["table_hookah"]["interaction"]["action"], "open_preparation")
+	assert_true(by_id["table_hookah"]["blocks"])
+	assert_true(not by_id["hookah_test"]["blocks"], "кальян стоит на столе")
+	assert_true(by_id["hookah_test"]["hidden"], "кальяна на столе изначально нет")
+	assert_true(not by_id["table_guest"]["interaction"]["enabled"], "курить можно только после подачи")
 
 
 func test_rejects_bad_interaction_rect() -> void:

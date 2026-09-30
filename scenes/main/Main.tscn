@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/DialogueBox.tscn" id="5_dialogue"]
 [ext_resource type="PackedScene" path="res://scenes/ui/MixerScreen.tscn" id="6_mixer"]
 [ext_resource type="PackedScene" path="res://scenes/ui/RecipeBookScreen.tscn" id="7_book"]
+[ext_resource type="PackedScene" path="res://scenes/ui/PreparationScreen.tscn" id="8_prep"]
 
 [node name="Main" type="Node" unique_id=157884796]
 script = ExtResource("1_main")
@@ -46,6 +47,10 @@ unique_name_in_owner = true
 layout_mode = 1
 
 [node name="RecipeBookScreen" parent="UI/Root" unique_id=825693731 instance=ExtResource("7_book")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="PreparationScreen" parent="UI/Root" instance=ExtResource("8_prep")]
 unique_name_in_owner = true
 layout_mode = 1
 

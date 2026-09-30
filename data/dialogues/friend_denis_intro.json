@@ -1,64 +1,54 @@
 {
   "id": "friend_denis_intro",
   "start": [
-    { "node": "repeat", "conditions": [{ "type": "story_progress_is", "value": "friend_01_intro_done" }] },
-    { "node": "greet" }
+    {
+      "node": "repeat",
+      "conditions": [
+        {
+          "type": "story_progress_is",
+          "value": "friend_01_intro_done"
+        }
+      ]
+    },
+    {
+      "node": "greet"
+    }
   ],
   "speakers": {
-    "player": { "name": "Я", "portrait": "🕺" },
-    "denis": { "name": "Денис", "portrait": "🚶‍♂️" }
+    "player": {
+      "name": "Я",
+      "portrait": "🕺"
+    },
+    "denis": {
+      "name": "Денис",
+      "portrait": "🚶‍♂️"
+    }
   },
   "nodes": {
     "greet": {
       "speaker": "denis",
-      "text": "О, привет! Ну ты даёшь — целый гараж под кальянную заставил. Я думал, тут хлам один.",
-      "next": "player_reply"
+      "text": "О, привет! Рад тебя видеть!",
+      "next": "order"
     },
-    "player_reply": {
-      "speaker": "player",
-      "text": "Хлам тоже есть. Зато теперь есть где собраться. Проходи, Денчик.",
-      "next": "denis_taste"
-    },
-    "denis_taste": {
+    "order": {
       "speaker": "denis",
-      "text": "Слушай, а можно что-нибудь сладкое? Клубнику, арбуз, что угодно фруктовое. Лимон с лаймом — это не моё, кисло.",
-      "next": "player_choice"
-    },
-    "player_choice": {
-      "speaker": "player",
-      "text": "Так что тебе приготовить?",
-      "choices": [
+      "text": "Сделаешь мне кальян? {order}",
+      "effects": [
         {
-          "text": "Сделаю тебе что-нибудь сладкое.",
-          "next": "sweet_reply",
-          "effects": [{ "type": "set_flag", "flag": "denis_intro_choice", "value": "sweet" }]
+          "type": "set_flag",
+          "flag": "denis_order_known",
+          "value": true
         },
         {
-          "text": "Сначала сам разберусь, что у меня есть.",
-          "next": "explore_reply",
-          "effects": [{ "type": "set_flag", "flag": "denis_intro_choice", "value": "explore" }]
+          "type": "set_story_progress",
+          "value": "friend_01_intro_done"
         }
-      ]
-    },
-    "sweet_reply": {
-      "speaker": "denis",
-      "text": "Вот это дело! Тогда я расслаблюсь и буду ждать. Только не пересласти, а то зубы заболят.",
-      "next": "outro"
-    },
-    "explore_reply": {
-      "speaker": "denis",
-      "text": "Ха, экспериментатор! Денчику не привыкать. Только про сладкое не забудь — я на тебя рассчитываю.",
-      "next": "outro"
-    },
-    "outro": {
-      "speaker": "denis",
-      "text": "Короче, я пока тут постою, а ты придумывай.",
-      "effects": [{ "type": "set_story_progress", "value": "friend_01_intro_done" }],
+      ],
       "end": true
     },
     "repeat": {
       "speaker": "denis",
-      "text": "Ну что, придумал чего-нибудь? Я всё ещё за сладкое.",
+      "text": "Жду свой кальян!",
       "end": true
     }
   }

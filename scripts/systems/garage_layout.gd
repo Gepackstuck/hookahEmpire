@@ -3,7 +3,7 @@ extends RefCounted
 ## Загрузка и валидация data-описания гаража (data/garage/*.json).
 ## Ошибки копятся в errors; is_valid() == false означает, что layout использовать нельзя.
 
-const VISUAL_TYPES := ["emoji", "texture", "box"]
+const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door"]
 const PROP_TYPES := ["hookah", "jar", "cup", "coals"]
 
 var id: String = ""
@@ -12,8 +12,15 @@ var player_spawn: Vector2 = Vector2.ZERO
 ## Нормализованные описания объектов. Ключи: id, name, cell (Vector2i), size (Vector2i),
 ## blocks (bool), anchor (Vector2, клетки), visual (Dictionary), interaction (Dictionary, может быть пустым;
 ## ключи: prompt, message, player_emoji, action, radius, rect (Rect2 в клетках)).
-## visual может содержать lift (подъём над полом, px) и glow (bool, сияние при приближении).
+## Объект может быть hidden (скрыт до показа кодом); interaction.enabled = false отключает взаимодействие.
+## visual.top_extra поднимает подсказку выше (px); visual.type "chair" рисует стул. visual может содержать lift (подъём над полом, px) и glow (bool, сияние при приближении).
 var objects: Array[Dictionary] = []
+## Клетка, куда игрок приносит кальян к столу гостя (необязательна).
+var hookah_serve_cell: Vector2i = Vector2i(-1, -1)
+## Клетка у стола для кальянов, куда игрок возвращается с кальяном для перезабивки.
+var hookah_prep_cell: Vector2i = Vector2i(-1, -1)
+## Клетка стула, куда садится игрок, чтобы покурить вместе с гостем.
+var player_seat_cell: Vector2i = Vector2i(-1, -1)
 var errors: Array[String] = []
 
 
@@ -59,6 +66,27 @@ func _parse(data: Dictionary) -> void:
 		if player_spawn.x < 0 or player_spawn.y < 0 or player_spawn.x >= size.x or player_spawn.y >= size.y:
 			errors.append("layout: player_spawn вне границ гаража")
 
+	if data.has("hookah_serve_cell"):
+		var serve_value: Variant = DataUtil.vec2(data["hookah_serve_cell"])
+		if serve_value == null or serve_value.x < 0 or serve_value.y < 0 or serve_value.x >= size.x or serve_value.y >= size.y:
+			errors.append("layout: hookah_serve_cell должен быть [x, y] внутри гаража")
+		else:
+			hookah_serve_cell = Vector2i(serve_value)
+
+	if data.has("hookah_prep_cell"):
+		var prep_value: Variant = DataUtil.vec2(data["hookah_prep_cell"])
+		if prep_value == null or prep_value.x < 0 or prep_value.y < 0 or prep_value.x >= size.x or prep_value.y >= size.y:
+			errors.append("layout: hookah_prep_cell должен быть [x, y] внутри гаража")
+		else:
+			hookah_prep_cell = Vector2i(prep_value)
+
+	if data.has("player_seat_cell"):
+		var seat_value: Variant = DataUtil.vec2(data["player_seat_cell"])
+		if seat_value == null or seat_value.x < 0 or seat_value.y < 0 or seat_value.x >= size.x or seat_value.y >= size.y:
+			errors.append("layout: player_seat_cell должен быть [x, y] внутри гаража")
+		else:
+			player_seat_cell = Vector2i(seat_value)
+
 	var raw_objects: Variant = data.get("objects", [])
 	if not (raw_objects is Array):
 		errors.append("layout: objects должен быть массивом")
@@ -80,6 +108,21 @@ func _parse(data: Dictionary) -> void:
 			blocking_rects.append(rect)
 			if Rect2i(Vector2i(player_spawn.floor()), Vector2i.ONE).intersects(rect):
 				errors.append("объект '%s': блокирует клетку появления игрока" % object["id"])
+	if hookah_serve_cell.x >= 0:
+		for rect in blocking_rects:
+			if rect.has_point(hookah_serve_cell):
+				errors.append("layout: hookah_serve_cell находится внутри непроходимого объекта")
+				break
+	if player_seat_cell.x >= 0:
+		for rect in blocking_rects:
+			if rect.has_point(player_seat_cell):
+				errors.append("layout: player_seat_cell находится внутри непроходимого объекта")
+				break
+	if hookah_prep_cell.x >= 0:
+		for rect in blocking_rects:
+			if rect.has_point(hookah_prep_cell):
+				errors.append("layout: hookah_prep_cell находится внутри непроходимого объекта")
+				break
 
 
 func _parse_object(entry: Variant, index: int, seen_ids: Dictionary) -> Dictionary:
@@ -147,6 +190,7 @@ func _parse_object(entry: Variant, index: int, seen_ids: Dictionary) -> Dictiona
 			"message": str(raw.get("message", "")),
 			"player_emoji": str(raw.get("player_emoji", "")),
 			"action": str(raw.get("action", "")),
+			"enabled": bool(raw.get("enabled", true)),
 			"radius": float(raw.get("radius", 1.0)),
 			"rect": Rect2(cell, obj_size),
 		}
@@ -167,6 +211,7 @@ func _parse_object(entry: Variant, index: int, seen_ids: Dictionary) -> Dictiona
 		"cell": cell,
 		"size": obj_size,
 		"blocks": bool(entry.get("blocks", false)),
+		"hidden": bool(entry.get("hidden", false)),
 		"anchor": anchor,
 		"visual": visual,
 		"interaction": interaction,

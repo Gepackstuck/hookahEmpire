@@ -26,9 +26,9 @@
       ],
       "blocks": false,
       "visual": {
-        "type": "emoji",
-        "text": "🚪",
-        "size": 64
+        "type": "door",
+        "color": "#8a5a3c",
+        "height": 78
       },
       "interaction": {
         "prompt": "Осмотреть",
@@ -49,7 +49,7 @@
       ],
       "blocks": true,
       "visual": {
-        "type": "box",
+        "type": "table",
         "color": "#9c6b43",
         "height": 26,
         "props": [
@@ -132,71 +132,168 @@
       }
     },
     {
+      "id": "table_hookah",
+      "name": "Стол для кальяна",
+      "cell": [
+        14,
+        6
+      ],
+      "size": [
+        3,
+        2
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "table",
+        "color": "#8a5a3c",
+        "height": 26,
+        "props": [
+          {
+            "type": "coals",
+            "at": [
+              -1.05,
+              0.45
+            ]
+          },
+          {
+            "type": "jar",
+            "at": [
+              -0.95,
+              -0.4
+            ],
+            "color": "#e8a33d"
+          },
+          {
+            "type": "cup",
+            "at": [
+              1.05,
+              0.45
+            ],
+            "color": "#6bd6c7"
+          }
+        ]
+      },
+      "interaction": {
+        "prompt": "Приготовить кальян",
+        "message": "",
+        "action": "open_preparation",
+        "rect": [
+          14,
+          6,
+          3,
+          2
+        ],
+        "radius": 1.0
+      }
+    },
+    {
+      "id": "chair_denis",
+      "name": "Стул",
+      "cell": [
+        12,
+        10
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "chair",
+        "color": "#8a5a3c"
+      }
+    },
+    {
+      "id": "chair_player",
+      "name": "Стул",
+      "cell": [
+        14,
+        9
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "chair",
+        "color": "#8a5a3c",
+        "facing": "y"
+      }
+    },
+    {
+      "id": "table_guest",
+      "name": "Стол Дениса",
+      "cell": [
+        13,
+        10
+      ],
+      "size": [
+        2,
+        2
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "table",
+        "color": "#7a5a44",
+        "height": 26,
+        "top_extra": 15,
+        "props": [
+          {
+            "type": "cup",
+            "at": [
+              -0.6,
+              0.5
+            ],
+            "color": "#f0c14b"
+          },
+          {
+            "type": "jar",
+            "at": [
+              0.6,
+              -0.55
+            ],
+            "color": "#9a6bd6"
+          }
+        ]
+      },
+      "interaction": {
+        "prompt": "Покурить",
+        "message": "",
+        "action": "smoke_hookah",
+        "rect": [
+          13,
+          10,
+          2,
+          2
+        ],
+        "radius": 1.0,
+        "enabled": false
+      }
+    },
+    {
       "id": "hookah_test",
       "name": "Кальян",
       "cell": [
-        12,
-        7
+        13,
+        10
       ],
       "size": [
         1,
         1
       ],
-      "blocks": true,
+      "blocks": false,
       "visual": {
         "type": "texture",
         "path": "res://art/furniture/hookah_test.png",
-        "height": 56
+        "height": 84,
+        "lift": 26
       },
-      "interaction": {
-        "prompt": "Затянуться",
-        "message": "Тестовый кальян. Тянется приятно.",
-        "player_emoji": "😶‍🌫️"
-      }
-    },
-    {
-      "id": "crate_test",
-      "name": "Ящик",
-      "cell": [
-        15,
-        3
+      "anchor": [
+        14.0,
+        11.05
       ],
-      "size": [
-        1,
-        1
-      ],
-      "blocks": true,
-      "visual": {
-        "type": "emoji",
-        "text": "📦",
-        "size": 36
-      },
-      "interaction": {
-        "prompt": "Открыть",
-        "message": "Ящик. Внутри пока пусто."
-      }
-    },
-    {
-      "id": "lamp_test",
-      "name": "Лампа",
-      "cell": [
-        3,
-        3
-      ],
-      "size": [
-        1,
-        1
-      ],
-      "blocks": true,
-      "visual": {
-        "type": "emoji",
-        "text": "💡",
-        "size": 40
-      },
-      "interaction": {
-        "prompt": "Осмотреть",
-        "message": "Лампа. Светит тепло и уютно."
-      }
+      "hidden": true
     },
     {
       "id": "recipe_book",
@@ -230,5 +327,17 @@
         "radius": 1.0
       }
     }
+  ],
+  "hookah_serve_cell": [
+    13,
+    12
+  ],
+  "hookah_prep_cell": [
+    15,
+    8
+  ],
+  "player_seat_cell": [
+    14,
+    9
   ]
 }

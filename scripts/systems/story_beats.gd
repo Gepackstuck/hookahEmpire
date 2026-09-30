@@ -4,7 +4,8 @@ extends RefCounted
 ##
 ## Бит: {"id", "requires_progress", "delay" (сек), "action": "spawn_friend", "guest",
 ##       "entry_position" [x,y] (точка появления у двери), "entry_cell" [x,y],
-##       "stand_cell" [x,y], "dialogue", "sets_progress"?}
+##       "stand_cell" [x,y], "dialogue", "sets_progress"?,
+##       "seat"? {"emoji", "facing": "left"|"right", "lift"? px} — поза друга, когда он дошёл (например, сел за стол)}
 
 const ACTIONS := ["spawn_friend"]
 
@@ -87,7 +88,15 @@ func _parse_beat(entry: Variant, index: int, seen: Dictionary) -> Dictionary:
 	if entry_position == null or entry_cell == null or stand_cell == null:
 		errors.append("%s: entry_position, entry_cell и stand_cell должны быть [x, y]" % label)
 		return {}
+	var seat := {}
+	if entry.has("seat"):
+		var raw_seat: Variant = entry["seat"]
+		if not (raw_seat is Dictionary) or str(raw_seat.get("emoji", "")).is_empty() or not ["left", "right"].has(str(raw_seat.get("facing", ""))):
+			errors.append("%s: seat должен быть {\"emoji\": ..., \"facing\": \"left\"|\"right\"}" % label)
+			return {}
+		seat = {"emoji": str(raw_seat["emoji"]), "facing": str(raw_seat["facing"]), "lift": float(raw_seat.get("lift", 0.0))}
 	return {
+		"seat": seat,
 		"id": beat_id,
 		"requires_progress": str(entry["requires_progress"]),
 		"delay": float(delay),

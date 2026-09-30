@@ -1,0 +1,12 @@
+{
+  "_comment": "ВРЕМЕННАЯ предварительная реакция гостя (превью M6): score = взвешенное среднее качества рецепта, соответствия вкусу гостя (fit) и исполнения. Настоящая формула GuestFit/TrendFit появится в M6.",
+  "weights": { "quality": 0.5, "fit": 0.3, "execution": 0.2 },
+  "likes_min": 55,
+  "emotions": [
+    { "min": 80, "id": "love", "emoji": "😍" },
+    { "min": 65, "id": "like", "emoji": "😊" },
+    { "min": 55, "id": "okay", "emoji": "🙂" },
+    { "min": 40, "id": "meh", "emoji": "😕" },
+    { "min": 0, "id": "dislike", "emoji": "🤢" }
+  ]
+}

@@ -107,13 +107,12 @@ func test_denis_intro_end_to_end() -> void:
 	runner.effect_requested.connect(effects.apply)
 	assert_true(runner.start(dialogue, effects.check))
 	assert_eq(runner.current_node()["id"], "greet")
-	while runner.is_active and runner.available_choices().is_empty():
+	var guard := 0
+	while runner.is_active and guard < 20:
 		runner.advance()
-	assert_eq(runner.current_node()["id"], "player_choice")
-	runner.choose(1)
-	while runner.is_active:
-		runner.advance()
-	assert_eq(state.get_flag("denis_intro_choice"), "explore")
+		guard += 1
+	assert_true(not runner.is_active, "диалог должен закончиться без выборов")
+	assert_true(state.get_flag("denis_order_known"), "заказ должен стать известен")
 	assert_eq(state.story_progress, "friend_01_intro_done")
 	# повторный разговор идёт по ветке "repeat"
 	runner.start(dialogue, effects.check)

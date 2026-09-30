@@ -427,6 +427,14 @@ UI решает, показывать ли результат как:
 - UI: `MixerScreen`, `RecipeBookScreen` (строятся кодом, общий стиль `UiStyle`); Main связывает их с гаражом и блокирует ввод мира, пока открыт экран.
 - Гараж: `interaction.action` (`open_mixer`, `open_recipe_book`) → сигнал `GarageWorld.action_requested`; необязательный `interaction.rect` [x,y,w,h] задаёт зону взаимодействия отдельно от размера объекта; `visual.lift` поднимает эмодзи над полом, `visual.glow` включает сияние при фокусе.
 
+### Preparation (M4)
+
+- Данные: `data/preparation/preparation.json` — параметры (id, name, weight, base, weights, options, подсказки), `penalty_per_level`, `ok_tolerance`. `PreparationConfig` валидирует; при ошибке `PreparationService.create()` возвращает `null`.
+- `ExecutionScoring` (чистые функции): `features(recipe)` → `targets` → `evaluate(recipe, choices)`; оптимум каждого параметра — линейная формула от признаков рецепта; оценка падает линейно от расстояния до оптимума.
+- `PreparationService.prepare(recipe_id, choices, preparer, mode)` → результат (recipe_name, execution_score, execution_band, parameters[{name, option_name, hint, is_ok}], preparer, mode), записывает его в рецепт (`RecipeSystem.record_preparation`) и шлёт `preparation_completed`. Запрос не зависит от того, кто выбрал параметры (быстрое окно, ручной режим, нанятый кальянщик).
+- `PreparationScreen` только собирает выбор и показывает результат. Garage: действие `open_preparation` у `table_hookah`.
+- `HookahStation` — состояние кальяна на столе (empty/prepared/liked/disliked), из него Main берёт подсказку, действие и позу игрока и через `GarageWorld.configure_interaction` меняет взаимодействие стола «на лету». `GuestReaction` — временная оценка гостя (превью M6). Друг умеет `set_smoking` и `show_emotion`, игрок — `set_smoking` (`SmokeEmitter`/`SmokePuff`).
+
 ---
 
 ## 8. Recipe representation
@@ -661,3 +669,7 @@ Gameplay-системы никогда не должны зависеть от �
 - хардкоженные guest preferences в scene scripts;
 - необратимые изменения без Git checkpoints;
 - реализация future business stages во время MVP.
+## Сценарий первого заказа (M4, переработка)
+- `ObjectiveTracker` (чистая логика): по контексту (гость, заказ известен, рецепты, состояние станции) возвращает текст цели и id объекта для стрелки. Main строит контекст и показывает метку.
+- `GarageWorld.carry_hookah_to_guest_table()` — корутина: блокирует ввод, игрок идёт с кальяном к `hookah_serve_cell`, кальян появляется на столе (`GarageObject.drop_in`).
+- Станция кальяна ("table_hookah") и стол гостя ("table_guest") настраиваются `Main._apply_station()`; `interaction.enabled` отключает взаимодействие без удаления объекта.

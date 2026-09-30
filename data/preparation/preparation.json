@@ -1,0 +1,144 @@
+{
+  "_comment": "Быстрое приготовление (M4). У каждого параметра есть оптимум (уровень 0..N-1 по индексу варианта), зависящий от рецепта: target = base + сумма(вес * признак). Признаки: вкусовые измерения, intensity, heat_sensitivity. Оценка параметра = 100 - penalty_per_level * |уровень - оптимум|.",
+  "penalty_per_level": 45,
+  "ok_tolerance": 0.5,
+  "parameters": [
+    {
+      "id": "packing",
+      "name": "Упаковка",
+      "weight": 0.25,
+      "base": 0.9,
+      "weights": {
+        "heavy": 1.5,
+        "creamy": 0.6,
+        "fresh": -1.0
+      },
+      "options": [
+        {
+          "id": "loose",
+          "name": "Рыхло"
+        },
+        {
+          "id": "normal",
+          "name": "Нормально"
+        },
+        {
+          "id": "dense",
+          "name": "Плотно"
+        }
+      ],
+      "hint_low": "слишком рыхло",
+      "hint_high": "слишком плотно",
+      "hint_ok": "в самый раз"
+    },
+    {
+      "id": "foil",
+      "name": "Фольга",
+      "weight": 0.2,
+      "base": -0.2,
+      "weights": {
+        "intensity": 1.5,
+        "heat_sensitivity": 1.0
+      },
+      "options": [
+        {
+          "id": "none",
+          "name": "Нет"
+        },
+        {
+          "id": "single",
+          "name": "Обычная"
+        },
+        {
+          "id": "double",
+          "name": "Двойная"
+        }
+      ],
+      "hint_low": "маловато фольги",
+      "hint_high": "слишком много фольги",
+      "hint_ok": "в самый раз"
+    },
+    {
+      "id": "holes",
+      "name": "Отверстия",
+      "weight": 0.2,
+      "base": 1.0,
+      "weights": {
+        "fresh": 1.0,
+        "heavy": -1.2,
+        "creamy": -0.5
+      },
+      "options": [
+        {
+          "id": "few",
+          "name": "Мало"
+        },
+        {
+          "id": "medium",
+          "name": "Средне"
+        },
+        {
+          "id": "many",
+          "name": "Много"
+        }
+      ],
+      "hint_low": "маловато отверстий",
+      "hint_high": "слишком много отверстий",
+      "hint_ok": "в самый раз"
+    },
+    {
+      "id": "coals",
+      "name": "Угли",
+      "weight": 0.2,
+      "base": 2.0,
+      "weights": {
+        "heavy": 0.6,
+        "heat_sensitivity": -2.0
+      },
+      "options": [
+        {
+          "id": "two",
+          "name": "2 угля"
+        },
+        {
+          "id": "three",
+          "name": "3 угля"
+        },
+        {
+          "id": "four",
+          "name": "4 угля"
+        }
+      ],
+      "hint_low": "маловато углей",
+      "hint_high": "слишком много углей",
+      "hint_ok": "в самый раз"
+    },
+    {
+      "id": "lighting",
+      "name": "Розжиг",
+      "weight": 0.15,
+      "base": 2.4,
+      "weights": {
+        "intensity": -2.0
+      },
+      "options": [
+        {
+          "id": "weak",
+          "name": "Слабо"
+        },
+        {
+          "id": "normal",
+          "name": "Нормально"
+        },
+        {
+          "id": "good",
+          "name": "Хорошо"
+        }
+      ],
+      "hint_low": "розжиг слабоват",
+      "hint_high": "розжиг слишком сильный",
+      "hint_ok": "в самый раз"
+    }
+  ],
+  "serve_weak_below": 60
+}

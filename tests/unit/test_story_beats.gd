@@ -47,3 +47,16 @@ func test_rejects_bad_beats() -> void:
 	data["beats"][0]["delay"] = -1
 	assert_true(not StoryBeats.from_dict(data).is_valid())
 	assert_true(not StoryBeats.from_dict({}).is_valid())
+
+
+func test_seat_validation_and_real_beat_seat() -> void:
+	var real := StoryBeats.load_file("res://data/story/intro_beats.json")
+	assert_true(real.is_valid(), str(real.errors))
+	assert_eq(real.beats[0]["seat"]["facing"], "right")
+	GameLog.muted = true
+	var data := _valid()
+	data["beats"][0]["seat"] = {"emoji": "🧘", "facing": "up"}
+	assert_true(not StoryBeats.from_dict(data).is_valid())
+	data["beats"][0]["seat"] = {"emoji": "🧘", "facing": "left"}
+	assert_true(StoryBeats.from_dict(data).is_valid())
+	GameLog.muted = false

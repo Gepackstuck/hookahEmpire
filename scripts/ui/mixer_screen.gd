@@ -22,6 +22,8 @@ var _name_edit: LineEdit
 var _save_button: Button
 var _status: Label
 var _hint: Label
+var _order_hint: Label
+var _order_hint_text := ""
 var _saved_since_open := false
 
 const DIMMED := Color(1, 1, 1, 0.35)
@@ -49,6 +51,14 @@ func setup(recipes: RecipeSystem) -> void:
 		_bars.clear()
 		_build()
 		visible = false
+
+
+## Текст подсказки под заголовком (что смешать под заказ гостя); пустой — скрыть.
+func set_order_hint(text: String) -> void:
+	_order_hint_text = text
+	if _order_hint != null:
+		_order_hint.text = text
+		_order_hint.visible = not text.is_empty()
 
 
 func open() -> void:
@@ -120,6 +130,10 @@ func _build() -> void:
 	close_button.text = "✕ Закрыть"
 	close_button.pressed.connect(close)
 	title_row.add_child(close_button)
+
+	_order_hint = UiStyle.label(_order_hint_text, 24, UiStyle.GOLD)
+	_order_hint.visible = not _order_hint_text.is_empty()
+	column.add_child(_order_hint)
 
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 40)
