@@ -1,0 +1,234 @@
+{
+  "id": "garage_main",
+  "size": [
+    20,
+    15
+  ],
+  "player_spawn": [
+    10.5,
+    12.5
+  ],
+  "objects": [
+    {
+      "id": "door_main",
+      "name": "Дверь",
+      "cell": [
+        0,
+        7
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "anchor": [
+        0.0,
+        7.5
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "emoji",
+        "text": "🚪",
+        "size": 64
+      },
+      "interaction": {
+        "prompt": "Осмотреть",
+        "message": "Дверь на улицу. Пока рано выходить.",
+        "radius": 1.2
+      }
+    },
+    {
+      "id": "table_test",
+      "name": "Стол для смешивания",
+      "cell": [
+        6,
+        6
+      ],
+      "size": [
+        4,
+        2
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "box",
+        "color": "#9c6b43",
+        "height": 26,
+        "props": [
+          {
+            "type": "hookah",
+            "at": [
+              -1.35,
+              -0.35
+            ],
+            "color": "#3fa7d6"
+          },
+          {
+            "type": "hookah",
+            "at": [
+              -0.35,
+              0.3
+            ],
+            "color": "#d65a7a"
+          },
+          {
+            "type": "jar",
+            "at": [
+              -0.05,
+              -0.55
+            ],
+            "color": "#e8a33d"
+          },
+          {
+            "type": "jar",
+            "at": [
+              0.35,
+              -0.3
+            ],
+            "color": "#7cc45e"
+          },
+          {
+            "type": "jar",
+            "at": [
+              0.1,
+              0.05
+            ],
+            "color": "#9a6bd6"
+          },
+          {
+            "type": "cup",
+            "at": [
+              -1.6,
+              0.55
+            ],
+            "color": "#f0c14b"
+          },
+          {
+            "type": "cup",
+            "at": [
+              0.6,
+              0.6
+            ],
+            "color": "#6bd6c7"
+          },
+          {
+            "type": "coals",
+            "at": [
+              1.0,
+              0.55
+            ]
+          }
+        ]
+      },
+      "interaction": {
+        "prompt": "Смешать",
+        "message": "",
+        "action": "open_mixer",
+        "rect": [
+          6,
+          6,
+          3,
+          2
+        ],
+        "radius": 1.0
+      }
+    },
+    {
+      "id": "hookah_test",
+      "name": "Кальян",
+      "cell": [
+        12,
+        7
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "texture",
+        "path": "res://art/furniture/hookah_test.png",
+        "height": 56
+      },
+      "interaction": {
+        "prompt": "Затянуться",
+        "message": "Тестовый кальян. Тянется приятно.",
+        "player_emoji": "😶‍🌫️"
+      }
+    },
+    {
+      "id": "crate_test",
+      "name": "Ящик",
+      "cell": [
+        15,
+        3
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "emoji",
+        "text": "📦",
+        "size": 36
+      },
+      "interaction": {
+        "prompt": "Открыть",
+        "message": "Ящик. Внутри пока пусто."
+      }
+    },
+    {
+      "id": "lamp_test",
+      "name": "Лампа",
+      "cell": [
+        3,
+        3
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "emoji",
+        "text": "💡",
+        "size": 40
+      },
+      "interaction": {
+        "prompt": "Осмотреть",
+        "message": "Лампа. Светит тепло и уютно."
+      }
+    },
+    {
+      "id": "recipe_book",
+      "name": "Книга рецептов",
+      "cell": [
+        9,
+        6
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "emoji",
+        "text": "📜",
+        "size": 36,
+        "lift": 26,
+        "glow": true
+      },
+      "interaction": {
+        "prompt": "Открыть книгу рецептов",
+        "message": "",
+        "action": "open_recipe_book",
+        "rect": [
+          9,
+          6,
+          1,
+          2
+        ],
+        "radius": 1.0
+      }
+    }
+  ]
+}

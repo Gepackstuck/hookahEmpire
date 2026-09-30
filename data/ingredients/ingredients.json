@@ -1,0 +1,228 @@
+{
+  "ingredients": [
+    {
+      "id": "strawberry",
+      "name": "Клубника",
+      "emoji": "🍓",
+      "cost": 4,
+      "unlock_condition": "always",
+      "sweet": 0.9,
+      "fresh": 0.2,
+      "sour": 0.1,
+      "fruit": 1.0,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0.2,
+      "intensity": 0.7,
+      "trend_tags": [
+        "fruit",
+        "sweet"
+      ],
+      "heat_sensitivity": 0.5
+    },
+    {
+      "id": "watermelon",
+      "name": "Арбуз",
+      "emoji": "🍉",
+      "cost": 4,
+      "unlock_condition": "always",
+      "sweet": 0.7,
+      "fresh": 0.6,
+      "sour": 0,
+      "fruit": 0.9,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0,
+      "intensity": 0.5,
+      "trend_tags": [
+        "fruit",
+        "fresh"
+      ],
+      "heat_sensitivity": 0.4
+    },
+    {
+      "id": "grape",
+      "name": "Виноград",
+      "emoji": "🍇",
+      "cost": 4,
+      "unlock_condition": "always",
+      "sweet": 0.8,
+      "fresh": 0.1,
+      "sour": 0.2,
+      "fruit": 0.9,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0.3,
+      "intensity": 0.6,
+      "trend_tags": [
+        "fruit",
+        "sweet"
+      ],
+      "heat_sensitivity": 0.5
+    },
+    {
+      "id": "peach",
+      "name": "Персик",
+      "emoji": "🍑",
+      "cost": 5,
+      "unlock_condition": "always",
+      "sweet": 0.85,
+      "fresh": 0.1,
+      "sour": 0.1,
+      "fruit": 0.9,
+      "creamy": 0.2,
+      "spicy": 0,
+      "heavy": 0.3,
+      "intensity": 0.6,
+      "trend_tags": [
+        "fruit",
+        "sweet"
+      ],
+      "heat_sensitivity": 0.5
+    },
+    {
+      "id": "mango",
+      "name": "Манго",
+      "emoji": "🥭",
+      "cost": 5,
+      "unlock_condition": "always",
+      "sweet": 0.9,
+      "fresh": 0.1,
+      "sour": 0.15,
+      "fruit": 1.0,
+      "creamy": 0.2,
+      "spicy": 0,
+      "heavy": 0.4,
+      "intensity": 0.75,
+      "trend_tags": [
+        "fruit",
+        "sweet",
+        "tropical"
+      ],
+      "heat_sensitivity": 0.6
+    },
+    {
+      "id": "blueberry",
+      "name": "Черника",
+      "emoji": "🫐",
+      "cost": 5,
+      "unlock_condition": "always",
+      "sweet": 0.6,
+      "fresh": 0.2,
+      "sour": 0.4,
+      "fruit": 0.9,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0.3,
+      "intensity": 0.5,
+      "trend_tags": [
+        "fruit",
+        "berry"
+      ],
+      "heat_sensitivity": 0.5
+    },
+    {
+      "id": "apple",
+      "name": "Яблоко",
+      "emoji": "🍎",
+      "cost": 3,
+      "unlock_condition": "always",
+      "sweet": 0.6,
+      "fresh": 0.4,
+      "sour": 0.3,
+      "fruit": 0.9,
+      "creamy": 0,
+      "spicy": 0.1,
+      "heavy": 0.3,
+      "intensity": 0.8,
+      "trend_tags": [
+        "fruit",
+        "classic"
+      ],
+      "heat_sensitivity": 0.5
+    },
+    {
+      "id": "lemon",
+      "name": "Лимон",
+      "emoji": "🍋",
+      "cost": 3,
+      "unlock_condition": "always",
+      "sweet": 0.1,
+      "fresh": 0.6,
+      "sour": 1.0,
+      "fruit": 0.6,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0,
+      "intensity": 0.7,
+      "trend_tags": [
+        "citrus",
+        "sour",
+        "fresh"
+      ],
+      "heat_sensitivity": 0.3
+    },
+    {
+      "id": "lime",
+      "name": "Лайм",
+      "emoji": "🍈",
+      "cost": 3,
+      "unlock_condition": "always",
+      "sweet": 0.1,
+      "fresh": 0.7,
+      "sour": 0.9,
+      "fruit": 0.5,
+      "creamy": 0,
+      "spicy": 0,
+      "heavy": 0,
+      "intensity": 0.65,
+      "trend_tags": [
+        "citrus",
+        "sour",
+        "fresh"
+      ],
+      "heat_sensitivity": 0.3
+    },
+    {
+      "id": "vanilla",
+      "name": "Ваниль",
+      "emoji": "🍦",
+      "cost": 3,
+      "unlock_condition": "always",
+      "sweet": 0.7,
+      "fresh": 0,
+      "sour": 0,
+      "fruit": 0,
+      "creamy": 1.0,
+      "spicy": 0.1,
+      "heavy": 0.6,
+      "intensity": 0.5,
+      "trend_tags": [
+        "creamy",
+        "sweet",
+        "dessert"
+      ],
+      "heat_sensitivity": 0.6
+    },
+    {
+      "id": "cola",
+      "name": "Кола",
+      "emoji": "🥤",
+      "cost": 3,
+      "unlock_condition": "always",
+      "sweet": 0.8,
+      "fresh": 0.3,
+      "sour": 0.2,
+      "fruit": 0.1,
+      "creamy": 0,
+      "spicy": 0.3,
+      "heavy": 0.4,
+      "intensity": 0.7,
+      "trend_tags": [
+        "soda",
+        "sweet"
+      ],
+      "heat_sensitivity": 0.4
+    }
+  ]
+}

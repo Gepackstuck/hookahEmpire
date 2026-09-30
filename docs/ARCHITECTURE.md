@@ -88,15 +88,21 @@ Main отвечает за переключение между high-level game s
 
 ```text
 Garage.tscn
-└── Garage
-    ├── Floor
-    ├── Walls
-    ├── FurnitureRoot
-    ├── CharactersRoot
-    ├── HookahsRoot
-    ├── InteractionsRoot
-    └── Navigation/Collision helpers
+└── Garage              (garage_world.gd)
+    ├── Backdrop        (пол и стены, рисуются кодом)
+    ├── Entities        (y_sort_enabled: объекты, игрок и NPC в одном списке сортировки)
+    └── InteractionPrompt
 ```
+
+Изменение в M1: мебель и персонажи лежат в одном `Entities` с Y-sort, а не в раздельных `FurnitureRoot`/`CharactersRoot`: сортировка по глубине не работает между разными родителями. Если понадобится разделение по типам, использовать группы, а не отдельные корни.
+
+### Изометрия и сетка (M1)
+
+- Логика работает в координатах сетки (клетки, float): `IsoProjection` переводит их в экран (клетка 64×32). Ось X сетки идёт на экране вправо-вниз, ось Y — влево-вниз.
+- Игрок двигается свободно; проходимость и столкновения — в `GarageGrid` (чистая логика без нод). Собственные коллизии вместо Godot physics: те же данные сетки будут использовать расстановка мебели (M9) и NPC.
+- NPC ходят по `GarageGrid.find_path()` (AStarGrid2D поверх той же сетки).
+- Описание гаража и объектов — `data/garage/*.json`, валидируется `GarageLayout`.
+- Ввод: input actions `move_up/down/left/right` и `interact` в `project.godot` (физические клавиши, работают на любой раскладке).
 
 ### UI overlay
 
@@ -319,8 +325,9 @@ UI решает, показывать ли результат как:
 
 ```json
 {
-  "id": "friend_sweet",
-  "name": "Max",
+  "id": "friend_denis",
+  "name": "Денис",
+  "emoji": "🚶‍♂️",
   "personality": "sweet_tooth",
   "patience": 0.8,
   "preference_profile": {
@@ -377,6 +384,48 @@ UI решает, показывать ли результат как:
   }
 }
 ```
+
+### Dialogue (M2)
+
+Диалоги лежат в `data/dialogues/*.json`, проверяются `DialogueLibrary.validate()` при загрузке (ошибки логируются, битый диалог не загружается).
+
+```json
+{
+  "id": "friend_denis_intro",
+  "start": [
+    { "node": "repeat", "conditions": [{ "type": "story_progress_is", "value": "friend_01_intro_done" }] },
+    { "node": "greet" }
+  ],
+  "speakers": { "denis": { "name": "Денис", "portrait": "🚶‍♂️" } },
+  "nodes": {
+    "greet": { "speaker": "denis", "text": "...", "next": "ask" },
+    "ask": { "speaker": "denis", "text": "...", "choices": [
+      { "text": "...", "next": "end_node",
+        "conditions": [], "effects": [{ "type": "set_flag", "flag": "denis_intro_choice", "value": "sweet" }] }
+    ] },
+    "end_node": { "speaker": "denis", "text": "...", "effects": [{ "type": "set_story_progress", "value": "friend_01_intro_done" }], "end": true }
+  }
+}
+```
+
+- У узла ровно одна форма выхода: `choices`, `next` или `end`.
+- `start` — id узла или список записей с условиями (берётся первая подходящая; последняя — без условий).
+- Эффекты узла применяются при входе в узел, эффекты выбора — при выборе.
+- Эффекты: `set_flag` (`flag`, `value`), `set_story_progress` (`value`). Условия: `flag_set`, `flag_equals`, `story_progress_is`. Новые типы добавляются в `StoryEffects` (и сразу попадают в валидацию).
+- `DialogueRunner` не знает про UI и сюжет: сигналы `node_entered(node, choices)`, `effect_requested(effect)`, `finished(dialogue_id)`. Эффекты применяет `StoryEffects` к `GameState`, условия проверяет он же.
+- Окно диалога (`DialogueBox`) получает узлы от Main; Main блокирует ввод в гараже на время диалога.
+
+Приход друзей описывается в `data/story/intro_beats.json` (`StoryBeats`): прогресс-условие, задержка, гость, точка входа, точка остановки, диалог, новый `story_progress`. Описание гостя — `data/guests/<id>.json` (`GuestCatalog`). NPC ходят по `PathWalker` вдоль пути из `GarageGrid.find_path()`.
+
+### Recipes (M3)
+
+- Контент: `data/ingredients/ingredients.json` (вкусовые измерения sweet/fresh/sour/fruit/creamy/spicy/heavy, intensity, cost, теги), `modifiers.json` (`ice`: `profile_delta`), `synergy.json` (пары −1..1), `data/config/scoring.json` (веса, лимиты, конфликты, полосы качества), `data/recipes/secret_recipes.json`. Загрузчики `IngredientCatalog` и `ScoringConfig` валидируют данные; при ошибке `RecipeSystem.create()` возвращает `null`, и Main показывает сообщение вместо смесителя.
+- `RecipeCanonical.canonicalize()` приводит доли к 20 целым единицам, отбрасывает ингредиенты с 0 единиц, сортирует по id и строит key `mint:10|strawberry:10;ice` → id `r_<md5[0..10]>`.
+- `RecipeScoring.evaluate()` — чистые функции: профиль, крепость, Synergy, Balance, Quality, секретный рецепт.
+- `RecipeSystem` (RefCounted) — `evaluate`, `commit` (новый/повторный), `rename`, `record_result`, `all_recipes`; хранит записи в `GameState.recipes`. Запись: id, key, name, custom_name, ingredients, modifiers, best_score, last_score, times_used (растёт только через `record_result`), created_seq, last_used_seq, secret_id. Секретные рецепты не переименовываются.
+- `MixSelection` — состояние порций (общий бюджет 4 порции, до 4 активных ингредиентов); `RecipeBookQuery` — фильтр/сортировка книги.
+- UI: `MixerScreen`, `RecipeBookScreen` (строятся кодом, общий стиль `UiStyle`); Main связывает их с гаражом и блокирует ввод мира, пока открыт экран.
+- Гараж: `interaction.action` (`open_mixer`, `open_recipe_book`) → сигнал `GarageWorld.action_requested`; необязательный `interaction.rect` [x,y,w,h] задаёт зону взаимодействия отдельно от размера объекта; `visual.lift` поднимает эмодзи над полом, `visual.glow` включает сияние при фокусе.
 
 ---
 

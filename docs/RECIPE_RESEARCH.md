@@ -1,8 +1,8 @@
-# Hookah Empire — Recipe Research Notes v0.1
+# Hookah Empire — Recipe Research Notes v0.2
 
 ## Назначение
 
-Этот документ — content-research workspace для flavor-combination references, которые позже будут питать recipe data игры.
+Этот документ — content-research workspace для flavor-combination references, которые питают recipe data игры.
 
 Цель — не представить какую-то комбинацию как универсально правильную. Игре нужны правдоподобные, интересные и сбалансированные отношения между вкусовыми ингредиентами.
 
@@ -16,23 +16,71 @@
 4. Конвертировать качественное наблюдение в **game-balance value**.
 5. Держать source note отдельно от финального numeric balance.
 
-## Предлагаемая таблица
+## Шкала Game synergy
 
-| Ingredient A | Ingredient B | Relationship | Confidence | Game synergy | Source / note |
-|---|---|---|---:|---:|---|
-| strawberry | mint | TBD | TBD | TBD | Research needed |
-| strawberry | lemon | TBD | TBD | TBD | Research needed |
-| watermelon | mint | TBD | TBD | TBD | Research needed |
-| grape | mint | TBD | TBD | TBD | Research needed |
-| peach | lemon | TBD | TBD | TBD | Research needed |
-| mango | mint | TBD | TBD | TBD | Research needed |
-| blueberry | lemon | TBD | TBD | TBD | Research needed |
-| vanilla | lemon | TBD | TBD | TBD | Research needed |
-| cola | lemon | TBD | TBD | TBD | Research needed |
-| lime | mint | TBD | TBD | TBD | Research needed |
+От **-1.0** (конфликт) до **+1.0** (классическая пара). Пары, которых нет в таблице, считаются нейтральными (0).
+Значение — баланс-параметр игры, а не утверждение о вкусе. Источник истины для кода — `data/ingredients/synergy.json`; эта таблица — обоснование.
+
+Уверенность: **Высокая** — пара названа несколькими независимыми источниками; **Средняя** — один источник или близкая формулировка; **Низкая** — оценка автора по аналогии, прямого источника нет.
+
+## Таблица (первый проход, 20 пар, 2026-09-30)
+
+| # | Ingredient A | Ingredient B | Relationship | Confidence | Game synergy | Source / note |
+|---:|---|---|---|---|---:|---|
+| 1 | apple | mint | complementary (классика) | Высокая | +0.90 | [2][3][5]: «двойное яблоко + мята» — традиционное сочетание |
+| 2 | watermelon | mint | complementary | Высокая | +0.80 | [1][2][3]: лёгкий, сочный, освежающий микс |
+| 3 | lemon | mint | complementary | Высокая | +0.80 | [1][2]: «холодный мятный лимонад» |
+| 4 | strawberry | mint | complementary | Высокая | +0.70 | [2][3]: мята усиливает фрукты |
+| 5 | grape | mint | complementary | Высокая | +0.70 | [1][3]: классика для длинной сессии |
+| 6 | strawberry | mango | complementary | Высокая | +0.70 | [1]: спелый тропический, мягкий вкус |
+| 7 | apple | peach | complementary | Высокая | +0.70 | [1]: мягче и слаще классического яблока |
+| 8 | strawberry | vanilla | complementary (десертный) | Средняя | +0.60 | [4][5]: «клубника/дыня + ваниль», «клубника + сливки» |
+| 9 | blueberry | mint | complementary | Высокая | +0.60 | [2][3] |
+| 10 | blueberry | lemon | complementary | Средняя | +0.60 | [2]: трёхсоставный «blueberry + lemon + mint»; [1]: черника + цитрус |
+| 11 | peach | mango | complementary | Средняя | +0.60 | [2]: схожая сладость |
+| 12 | lime | mint | complementary | Низкая | +0.60 | Прямого источника нет; по аналогии с lemon + mint [1][2] |
+| 13 | mango | mint | complementary | Средняя | +0.50 | [3]: манго среди фруктов, хорошо идущих с мятой |
+| 14 | peach | mint | complementary | Средняя | +0.50 | [3]; [4]: «абрикос + мята (2:1)» |
+| 15 | mango | watermelon | complementary | Средняя | +0.50 | [4]: «манго + арбуз (2:1)» |
+| 16 | grape | lemon | complementary | Средняя | +0.50 | [5]: «виноград + лимон — лёгкая кислинка» |
+| 17 | cola | lemon | complementary | Низкая | +0.50 | Прямого источника нет; кола как «газировка» с кислинкой; [4] отмечает колу как классику в паре с вишней |
+| 18 | lemon | vanilla | complementary | Средняя | +0.40 | [4]: «лимон + ваниль (1:1) — нежные ноты дополняют» |
+| 19 | apple | lemon | contrasting | Средняя | +0.30 | [4]: «яблоко + цитрус — контрастный свежий эффект» |
+| 20 | apple | blueberry | clash (интенсивность) | Низкая | -0.30 | Аналогия с [2]: интенсивное двойное яблоко «заглушает» деликатные вкусы; прямого источника нет |
+
+### Общие принципы из источников (идут в Balance / правила)
+
+- Слишком много вкусов в одной чаше даёт «грязный» вкус [1][2] → ограничение до 4 ингредиентов.
+- Несочетаемые по интенсивности вкусы (деликатный + подавляющий) дают плохой результат [2].
+- Два ярких вкуса без связующего элемента и резкие противоположности без «мягкой базы» конфликтуют [5].
+- Мята — частая «связка»: хорошо сочетается почти со всеми фруктами [3].
+- Вкусы-«приправы» (мята, ваниль, пряности) уместны в малых долях [4].
+
+### Не вошли в первые 20 пар (по умолчанию 0, расширить позже)
+
+peach–lemon, strawberry–lemon, vanilla–peach и остальные комбинации; пары с «Ледяной нотой» не нужны — это модификатор, а не ингредиент (см. `data/ingredients/modifiers.json`).
+
+## Секретный рецепт
+
+«Двойное яблочко» — apple на 100% (модификаторы не учитываются). Название отсылает к классическому «double apple» [2][6]; задаётся в `data/recipes/secret_recipes.json`.
+
+## Источники
+
+1. [The Hookah Lab — Best Hookah Flavors Mix](https://thehookahlab.com/blogs/hookah-blog/best-hookah-flavors-mix)
+2. [Carnys — Ultimate Hookah Flavor Pairing Guide](https://carnys.org/blog/ultimate-hookah-flavor-pairing-guide)
+3. [MOB Hookah — Mint Hookah Flavor: 15 Ways To Mix](https://www.mobhookah.com/blogs/blogs/mint-hookah-flavor)
+4. [Kolbix — Как смешивать табак для кальяна](https://kolbix.com/ru/kaljan-kakie-tabaki-smeshivat)
+5. [Axle-CRM — Лучшие миксы табака для кальяна](https://axle-crm.com/blog/sochetaniya-tabaka-dlya-kalyana)
+6. [Smokedex — Double Apple](https://smokedex.info/en/shisha/flavor/double-apple) (упомянут в результатах поиска, страница не читалась)
+
+Замечание: нумерация источников в колонке «Source» следует порядку в этом списке. Источники 1–5 прочитаны, источник 6 использован только по заголовку.
 
 ## Важная implementation note
 
-Не блокировать кодовую базу на завершении этого документа.
+Не блокировать кодовую базу на завершении этого документа. Значения — временные, правятся в `data/ingredients/synergy.json` без изменения кода.
 
-M3 может использовать временные balance values, чтобы RecipeSystem и Recipe Book стали тестируемыми. Заменить временную matrix после research-прохода.
+
+## Изменения M3 (после первой проверки)
+
+- Мята удалена из игры (её роль — модификатор «Ледяная нотка»); все пары с мятой исключены из `data/ingredients/synergy.json`. Исследовательские заметки по ним остаются выше как справочные.
+- Добавлены пары без внешнего источника (tuning-значения для баланса, требуют проверки): арбуз–лайм 0.6, персик–ваниль 0.5, манго–лайм 0.5, клубника–лайм 0.5, кола–ваниль 0.5, виноград–ваниль 0.3, яблоко–ваниль 0.3, персик–клубника 0.5, черника–ваниль 0.4. Клубника–ваниль повышена до 1.0 — это «идеальный» рецепт.

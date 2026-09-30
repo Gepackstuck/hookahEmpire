@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/garage_world.gd" id="1_world"]
+[ext_resource type="Script" path="res://scripts/entities/garage_backdrop.gd" id="2_backdrop"]
+[ext_resource type="PackedScene" path="res://scenes/ui/InteractionPrompt.tscn" id="3_prompt"]
+
+[node name="Garage" type="Node2D"]
+script = ExtResource("1_world")
+
+[node name="Backdrop" type="Node2D" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2_backdrop")
+
+[node name="Entities" type="Node2D" parent="."]
+unique_name_in_owner = true
+y_sort_enabled = true
+
+[node name="InteractionPrompt" parent="." instance=ExtResource("3_prompt")]
+unique_name_in_owner = true

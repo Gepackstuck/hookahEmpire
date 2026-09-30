@@ -1,5 +1,6 @@
 extends SceneTree
 ## Запуск: godot --headless --path <проект> --script res://tests/run_tests.gd
+## Тесты могут использовать await (например, ждать кадр, чтобы сработал _ready у нод).
 ## Находит tests/unit/test_*.gd, выполняет все методы test_*, выходит с кодом 0/1.
 
 const UNIT_DIR := "res://tests/unit"
@@ -30,7 +31,7 @@ func _initialize() -> void:
 				continue
 			var case: TestCase = script.new()
 			case.begin("%s::%s" % [file_name, method_name])
-			case.call(method_name)
+			await case.call(method_name) # тест может быть корутиной (await process_frame)
 			total += 1
 			if case.failures.is_empty():
 				print("PASS %s::%s" % [file_name, method_name])

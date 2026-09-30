@@ -268,7 +268,7 @@ Heavy creamy profiles: negative trend contribution
 
 Начальный набор должен быть достаточно малым для ручного баланса.
 
-Предлагаемые стартовые ингредиенты (12):
+Стартовые ингредиенты (11, фактический состав M3; мята убрана — её заменяет «Ледяная нотка»):
 
 1. Strawberry
 2. Watermelon
@@ -278,10 +278,11 @@ Heavy creamy profiles: negative trend contribution
 6. Blueberry
 7. Lemon
 8. Lime
-9. Mint
-10. Vanilla
-11. Cola
-12. Ice/Fresh note (реализуется как flavor-ингредиент или модификатор — по результатам прототипа)
+9. Vanilla
+10. Cola
+11. Apple (добавлен в M3)
+
+Ice/Fresh note («Ледяная нотка» ❄️) реализована как модификатор-галочка, а не ингредиент (решено в M3). Рецепт может состоять из 1–4 ингредиентов (один — для секретного рецепта «Двойное яблочко»: 100% яблоко).
 
 Эти имена — placeholder-контент для MVP-баланса. Их числовые значения совместимости/вкуса должны считаться tunable game data и валидироваться через content-research pass, описанный в `docs/RECIPE_RESEARCH.md`.
 
@@ -668,7 +669,7 @@ sprite
 ```json
 {
   "id": "friend_01_offer",
-  "speaker": "max",
+  "speaker": "denis",
   "text": "Слушай, а если попробовать пустить сюда кого-то кроме нас?",
   "choices": [
     {

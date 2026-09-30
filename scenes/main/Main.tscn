@@ -1,52 +1,54 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://b2wppclqifrtv"]
 
-[ext_resource type="Script" path="res://scripts/core/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://b6wn7hhbp14jv" path="res://scripts/core/main.gd" id="1_main"]
 [ext_resource type="Theme" path="res://ui/theme/placeholder_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/garage/Garage.tscn" id="3_garage"]
+[ext_resource type="PackedScene" path="res://scenes/ui/MessageToast.tscn" id="4_toast"]
+[ext_resource type="PackedScene" path="res://scenes/ui/DialogueBox.tscn" id="5_dialogue"]
+[ext_resource type="PackedScene" path="res://scenes/ui/MixerScreen.tscn" id="6_mixer"]
+[ext_resource type="PackedScene" path="res://scenes/ui/RecipeBookScreen.tscn" id="7_book"]
 
-[node name="Main" type="Node"]
+[node name="Main" type="Node" unique_id=157884796]
 script = ExtResource("1_main")
 
-[node name="WorldRoot" type="Node2D" parent="."]
+[node name="WorldRoot" type="Node2D" parent="." unique_id=309010570]
 
-[node name="UI" type="CanvasLayer" parent="."]
+[node name="Garage" parent="WorldRoot" unique_id=669992595 instance=ExtResource("3_garage")]
+unique_name_in_owner = true
 
-[node name="Root" type="Control" parent="UI"]
+[node name="UI" type="CanvasLayer" parent="." unique_id=778346558]
+
+[node name="Root" type="Control" parent="UI" unique_id=1138548320]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme = ExtResource("2_theme")
 
-[node name="Background" type="ColorRect" parent="UI/Root"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-color = Color(0.11, 0.09, 0.08, 1)
+[node name="HintLabel" type="Label" parent="UI/Root" unique_id=986297874]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 18.0
+offset_right = 900.0
+offset_bottom = 58.0
+theme_override_font_sizes/font_size = 22
+text = "WASD / стрелки — ходить   ·   E — взаимодействовать"
 
-[node name="Center" type="CenterContainer" parent="UI/Root"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="Box" type="VBoxContainer" parent="UI/Root/Center"]
-layout_mode = 2
-
-[node name="TitleLabel" type="Label" parent="UI/Root/Center/Box"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 72
-text = "Hookah Empire"
-horizontal_alignment = 1
-
-[node name="StatusLabel" type="Label" parent="UI/Root/Center/Box"]
+[node name="MessageToast" parent="UI/Root" unique_id=205630643 instance=ExtResource("4_toast")]
 unique_name_in_owner = true
-layout_mode = 2
-text = "Foundation"
-horizontal_alignment = 1
+layout_mode = 1
+
+[node name="MixerScreen" parent="UI/Root" unique_id=562297041 instance=ExtResource("6_mixer")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="RecipeBookScreen" parent="UI/Root" unique_id=825693731 instance=ExtResource("7_book")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="DialogueBox" parent="UI/Root" unique_id=688725677 instance=ExtResource("5_dialogue")]
+unique_name_in_owner = true
+layout_mode = 1

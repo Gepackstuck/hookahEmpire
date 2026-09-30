@@ -1,0 +1,76 @@
+{
+  "_comment": "Все баланс-параметры скоринга рецептов (docs/GDD.md §7.3). Правятся без изменения кода.",
+  "weights": {
+    "synergy": 0.7,
+    "balance": 0.3
+  },
+  "max_ingredients": 4,
+  "total_units": 20,
+  "single_ingredient_synergy": 60,
+  "dimension_names": {
+    "sweet": "Сладость",
+    "fresh": "Свежесть",
+    "sour": "Кислинка",
+    "fruit": "Фруктовость",
+    "creamy": "Сливочность",
+    "spicy": "Пряность",
+    "heavy": "Тяжесть"
+  },
+  "balance": {
+    "conflicts": [
+      {
+        "a": "sweet",
+        "b": "sour",
+        "weight": 0.6
+      },
+      {
+        "a": "fresh",
+        "b": "heavy",
+        "weight": 0.6
+      },
+      {
+        "a": "creamy",
+        "b": "sour",
+        "weight": 0.4
+      }
+    ],
+    "conflict_scale": 60,
+    "intensity_min": 0.35,
+    "intensity_max": 0.75,
+    "intensity_penalty_per_unit": 50
+  },
+  "bands": [
+    {
+      "min": 0,
+      "id": "bad",
+      "name": "Плохо"
+    },
+    {
+      "min": 40,
+      "id": "weak",
+      "name": "Слабо"
+    },
+    {
+      "min": 60,
+      "id": "okay",
+      "name": "Нормально"
+    },
+    {
+      "min": 75,
+      "id": "good",
+      "name": "Хорошо"
+    },
+    {
+      "min": 85,
+      "id": "excellent",
+      "name": "Отлично"
+    },
+    {
+      "min": 95,
+      "id": "exceptional",
+      "name": "Великолепно"
+    }
+  ],
+  "synergy_neutral": 58,
+  "max_portions": 4
+}

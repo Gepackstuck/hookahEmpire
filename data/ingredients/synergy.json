@@ -1,0 +1,105 @@
+{
+  "_comment": "Обоснование значений — docs/RECIPE_RESEARCH.md. Пары, которых нет в списке, считаются нейтральными (0).",
+  "pairs": [
+    {
+      "a": "strawberry",
+      "b": "mango",
+      "value": 0.7
+    },
+    {
+      "a": "apple",
+      "b": "peach",
+      "value": 0.7
+    },
+    {
+      "a": "strawberry",
+      "b": "vanilla",
+      "value": 1.0
+    },
+    {
+      "a": "blueberry",
+      "b": "lemon",
+      "value": 0.6
+    },
+    {
+      "a": "peach",
+      "b": "mango",
+      "value": 0.6
+    },
+    {
+      "a": "mango",
+      "b": "watermelon",
+      "value": 0.5
+    },
+    {
+      "a": "grape",
+      "b": "lemon",
+      "value": 0.5
+    },
+    {
+      "a": "cola",
+      "b": "lemon",
+      "value": 0.5
+    },
+    {
+      "a": "lemon",
+      "b": "vanilla",
+      "value": 0.4
+    },
+    {
+      "a": "apple",
+      "b": "lemon",
+      "value": 0.3
+    },
+    {
+      "a": "apple",
+      "b": "blueberry",
+      "value": -0.3
+    },
+    {
+      "a": "watermelon",
+      "b": "lime",
+      "value": 0.6
+    },
+    {
+      "a": "peach",
+      "b": "vanilla",
+      "value": 0.5
+    },
+    {
+      "a": "mango",
+      "b": "lime",
+      "value": 0.5
+    },
+    {
+      "a": "strawberry",
+      "b": "lime",
+      "value": 0.5
+    },
+    {
+      "a": "cola",
+      "b": "vanilla",
+      "value": 0.5
+    },
+    {
+      "a": "grape",
+      "b": "vanilla",
+      "value": 0.3
+    },
+    {
+      "a": "apple",
+      "b": "vanilla",
+      "value": 0.3
+    },
+    {
+      "a": "peach",
+      "b": "strawberry",
+      "value": 0.5
+    },
+    {
+      "a": "blueberry",
+      "b": "vanilla",
+      "value": 0.4
+    }
+  ]
+}

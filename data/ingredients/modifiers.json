@@ -1,0 +1,15 @@
+{
+  "modifiers": [
+    {
+      "id": "ice",
+      "name": "Ледяная нотка",
+      "emoji": "❄️",
+      "cost": 1,
+      "profile_delta": {
+        "fresh": 0.3,
+        "sweet": -0.1,
+        "heavy": -0.1
+      }
+    }
+  ]
+}
