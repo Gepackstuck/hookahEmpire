@@ -11,19 +11,24 @@ config_version=5
 [application]
 
 config/name="hookahEmpire"
-config/features=PackedStringArray("4.7", "Mobile")
+config/version="0.0.1-m0"
+run/main_scene="res://scenes/main/Main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
+
+[autoload]
+
+GameState="*res://scripts/core/game_state.gd"
+SaveService="*res://scripts/core/save_service.gd"
 
 [display]
 
+window/size/viewport_width=1920
+window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[physics]
-
-3d/physics_engine="Jolt Physics"
-
 [rendering]
 
-rendering_device/driver.windows="d3d12"
-renderer/rendering_method="mobile"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

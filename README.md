@@ -4,12 +4,13 @@
 
 ## Файлы
 
-- `AGENTS.md` — постоянные инструкции для Codex.
+- `AGENTS.md` — постоянные инструкции для агента (Беброид).
 - `docs/GDD.md` — game-design источник истины.
 - `docs/MVP_PLAN.md` — implementation roadmap M0–M11.
 - `docs/ARCHITECTURE.md` — техническая структура и data contracts.
 - `docs/PROGRESS.md` — milestone-трекинг и открытые решения.
 - `docs/RECIPE_RESEARCH.md` — workspace для flavor-combination research.
+- `docs/DEV_SETUP.md` — локальная разработка: запуск Godot, проверки, тесты.
 
 ## Куда положить
 
@@ -24,6 +25,8 @@ hookahEmpire/
     ├── MVP_PLAN.md
     ├── ARCHITECTURE.md
     ├── PROGRESS.md
-    └── RECIPE_RESEARCH.md
+    ├── RECIPE_RESEARCH.md
+    └── DEV_SETUP.md
+```
 
 Эти документы описывают только Garage MVP. Не расширять реализацию в следующие бизнес-этапы, пока MVP не завершён и не пере-скоуплен явно.

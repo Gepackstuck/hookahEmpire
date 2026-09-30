@@ -2,9 +2,9 @@
 
 ## Текущий статус
 
-**Design phase. Ни один implementation milestone ещё не начат в исходном репозитории.**
+**M0 Foundation выполнен и верифицирован (автоматические проверки).** Остальные milestones не начаты.
 
-Текущая цель: согласовать/итерировать MVP-дизайн и затем начать M0.
+Текущая цель: начать M1 по отдельной команде.
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Milestone | Статус | Заметки |
 |---|---|---|
-| M0 Foundation | Не начат | Project bootstrap и architecture |
+| M0 Foundation | Выполнен | Headless-проверки пройдены; запуск игры подтверждён разработчиком |
 | M1 Garage + Player | Не начат | Playable garage |
 | M2 Dialogue + Friends | Не начат | Первый social loop |
 | M3 Ingredients + Recipes + Recipe Book | Не начат | Core discovery system |
@@ -43,6 +43,18 @@
 - Dialogue — data-driven.
 - Save data — versioned.
 - MVP заканчивается на invitation to serve outside guests.
+
+### Зафиксировано в M0
+
+- Рендерер: Compatibility (`gl_compatibility`), 3D-настройки Jolt/d3d12 удалены.
+- Базовое разрешение: 1920×1080, stretch `canvas_items`, aspect `expand`.
+- Формат контента: JSON в `data/`.
+- Корневая `ui/` — общие UI-ресурсы (темы); экраны — в `scenes/ui/` и `scripts/ui/`.
+- Autoloads: только `GameState` и `SaveService`. `GameState` хранит данные и сигналы без логики.
+- Логирование: `GameLog.debug/info/warn/error(tag, message)`.
+- Тесты: собственный раннер `tests/run_tests.gd`, без внешних фреймворков.
+- Имя агента в документах: Беброид.
+- Коммиты делает разработчик, агент их не создаёт.
 
 ---
 
@@ -75,4 +87,17 @@
 
 ## Последняя верификация
 
-Пока нет.
+**M0 — 2026-09-30, Godot 4.7.2.stable (Steam), macOS.**
+
+Команда: `GODOT_BIN=... tools/run_checks.sh` (лог: `tests/last_run.log`, не в git).
+
+- Импорт ресурсов: OK.
+- Parse-check всех 8 `.gd`: OK.
+- Юнит-тесты: 6 тестов, 0 провалено.
+- Headless-запуск main scene: OK, `[INFO][main] Boot OK, version 0.0.1-m0`.
+- Запуск игры в редакторе: выполнен разработчиком. Проверка «закрыть/переоткрыть редактор и запустить снова» отдельно не подтверждена.
+
+Известные замечания:
+
+- Предупреждение Godot `Case mismatch` про папку `user://`: на диске `.../app_userdata/HookahEmpire`, в проекте `hookahEmpire`. На macOS безвредно; разобраться до M11 (save/load).
+- В `run_checks.sh` любой вывод `ERROR:` считается провалом, поэтому тесты, намеренно вызывающие ошибки, должны глушить логи через `GameLog.muted`.

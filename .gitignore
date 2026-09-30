@@ -1,3 +1,12 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# macOS
+.DS_Store
+
+# Локальные секреты экспорта
+export_credentials.cfg
+
+# Лог последнего прогона проверок
+tests/last_run.log
