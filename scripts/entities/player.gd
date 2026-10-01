@@ -28,8 +28,10 @@ var seated: bool = false
 var _carry_width: float = 0.0
 var _carried: Sprite2D
 var _carried_hookah: CarriedHookah
+var _head: HeadLabels
 var _stand_button: PanelContainer
 var _zoom_tween: Tween = null
+var _camera_following := true
 var _auto_walker := PathWalker.new()
 var _auto_walking: bool = false
 
@@ -56,6 +58,9 @@ func _ready() -> void:
 	_carried_hookah = CarriedHookah.new()
 	_carried_hookah.visible = false
 	add_child(_carried_hookah)
+	_head = HeadLabels.new()
+	add_child(_head)
+	_head.position.y = 16.0  # чипы и реплики кальянщика ближе к голове
 
 
 ## Надпись «E Встать» над головой в стиле остальных подсказок (рамка клавиши + текст), поменьше; клик тоже встаёт.
@@ -105,8 +110,37 @@ func _make_stand_button() -> PanelContainer:
 	return panel
 
 
+## Следование камеры за кальянщиком. Выключено — камера стоит по центру помещения и показывает его целиком
+## (режим NPC); включено — как обычно ездит за игроком.
+func set_camera_follow(follow: bool, bounds: Rect2i) -> void:
+	_camera_following = follow
+	if _zoom_tween != null:
+		_zoom_tween.kill()
+	_zoom_tween = create_tween()
+	_zoom_tween.set_parallel(true)
+	var zoom_to := DEFAULT_ZOOM
+	if follow:
+		_camera.top_level = false
+		_camera.position = Vector2(0, -24)
+		_camera.offset = Vector2.ZERO
+		_camera.reset_smoothing()
+	else:
+		var view := get_viewport_rect().size
+		zoom_to = minf(DEFAULT_ZOOM, minf(view.x / maxf(float(bounds.size.x), 1.0), view.y / maxf(float(bounds.size.y), 1.0)))
+		_camera.top_level = true
+		_camera.offset = Vector2.ZERO
+		_camera.global_position = Vector2(bounds.get_center())
+	_zoom_tween.tween_property(_camera, "zoom", Vector2(zoom_to, zoom_to), 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func is_camera_following() -> bool:
+	return _camera_following
+
+
 ## Камера приближается к столу (focus — смещение от игрока в экранных px).
 func focus_camera(zoom_value: float, focus: Vector2) -> void:
+	if not _camera_following:
+		return
 	if _zoom_tween != null:
 		_zoom_tween.kill()
 	_zoom_tween = create_tween()
@@ -116,6 +150,8 @@ func focus_camera(zoom_value: float, focus: Vector2) -> void:
 
 
 func reset_camera() -> void:
+	if not _camera_following:
+		return
 	if _zoom_tween != null:
 		_zoom_tween.kill()
 	_zoom_tween = create_tween()
@@ -220,9 +256,31 @@ func set_carrying(texture: Texture2D, height: float = 44.0) -> void:
 
 
 ## Несёт в руках векторный кальян цвета color (null-значение не нужно: чтобы убрать — set_carrying(null)).
-func set_carrying_hookah(color: Color) -> void:
+## Реплика над головой (режим NPC); возвращает длительность показа.
+func clear_speech() -> void:
+	_head.clear_speech()
+
+
+func say(text: String) -> float:
+	return _head.say(text)
+
+
+func set_chips(chips: Array) -> void:
+	_head.set_chips(chips)
+
+
+func clear_chips() -> void:
+	_head.clear_chips()
+
+
+func head_labels() -> HeadLabels:
+	return _head
+
+
+func set_carrying_hookah(color: Color, top: int = 0) -> void:
 	_carried.visible = false
 	_carried_hookah.color = color
+	_carried_hookah.top = top
 	_carried_hookah.position = Vector2(_carry_side() * 17.0, -2.0)
 	_carried_hookah.visible = true
 	_carried_hookah.queue_redraw()
@@ -261,6 +319,18 @@ func piece_color() -> Color:
 
 
 ## +1 — смотрит вправо, -1 — влево; доля затяжки (0 — рука внизу, 1 — у рта).
+func look_toward(screen_delta: Vector2) -> void:
+	_figure.look_toward(screen_delta)
+
+
+func look_straight() -> void:
+	_figure.view = CharacterFigure.VIEW_SIDE
+
+
+func is_idle() -> bool:
+	return not _figure.moving and not _figure.holding and not _figure.puffing
+
+
 func facing_sign() -> float:
 	return 1.0 if _figure.facing_right else -1.0
 
@@ -302,12 +372,14 @@ func _process_movement(delta: float) -> void:
 	if _auto_walking:
 		_figure.moving = true
 		var previous_x := position.x
+		var previous_y := position.y
 		var finished := _auto_walker.step(minf(delta, MAX_FRAME_DELTA))
 		grid_position = _auto_walker.position
 		position = IsoProjection.grid_to_screen(grid_position)
 		var dx := position.x - previous_x
-		if absf(dx) > 0.01:
-			_face(dx > 0.0)
+		var dy := position.y - previous_y
+		if absf(dx) > 0.01 or absf(dy) > 0.01:
+			_face_dir(Vector2(dx, dy))
 		if finished:
 			_auto_walking = false
 			auto_walk_finished.emit()
@@ -320,11 +392,17 @@ func _process_movement(delta: float) -> void:
 	if seated:
 		stand_up()
 	_figure.moving = true
-	if absf(input.x) > 0.05:
-		_face(input.x > 0.0)
+	_face_dir(input)
 	var step := IsoProjection.screen_dir_to_grid_dir(input) * input.length() * SPEED_CELLS_PER_SEC * minf(delta, MAX_FRAME_DELTA)
 	grid_position = _grid.resolve_move(grid_position, step, HALF_EXTENT)
 	position = IsoProjection.grid_to_screen(grid_position)
+
+
+## Направление шага на экране: вертикаль — лицом/спиной, иначе боком.
+func _face_dir(screen_delta: Vector2) -> void:
+	_figure.walk_toward(screen_delta)
+	_carried.position.x = _carry_side() * 16.0 - _carry_width * 0.5
+	_carried_hookah.position.x = _carry_side() * 17.0
 
 
 func _face(right: bool) -> void:

@@ -13,6 +13,11 @@ const GRIP_DROP := 5.3
 const POSE_STAND := "stand"
 const POSE_SIT := "sit"
 
+## Ракурс: сбоку (смотрит вправо/влево), лицом к зрителю или спиной.
+const VIEW_SIDE := "side"
+const VIEW_FRONT := "front"
+const VIEW_BACK := "back"
+
 var skin := Color("#f1c27d")
 var hair := Color("#4a3020")
 var shirt := Color("#e8833a")
@@ -34,6 +39,7 @@ var pose: String = POSE_STAND
 var moving: bool = false
 var puffing: bool = false
 var facing_right: bool = true
+var view: String = VIEW_SIDE
 
 var _phase: float = 0.0
 var _time: float = 0.0
@@ -65,9 +71,61 @@ static func make(style: String) -> CharacterFigure:
 	return figure
 
 
+## Внешность из описания гостя (look): цвета "#rrggbb" для skin/hair/shirt/pants/shoes/jacket.
+func apply_look(look: Dictionary) -> void:
+	for part in look:
+		var color := Color.html(str(look[part]))
+		match str(part):
+			"skin":
+				skin = color
+			"hair":
+				hair = color
+			"shirt":
+				shirt = color
+			"pants":
+				pants = color
+			"shoes":
+				shoes = color
+			"jacket":
+				jacket = color
+	queue_redraw()
+
+
 func set_facing(right: bool) -> void:
 	facing_right = right
+	view = VIEW_SIDE
 	scale = Vector2(BODY_SCALE if right else -BODY_SCALE, BODY_SCALE)
+
+
+## Повернуться к точке: screen_delta — вектор на экране от фигуры к цели.
+## Больше вертикали — лицом к зрителю (цель ниже) или спиной (выше), иначе боком.
+func look_toward(screen_delta: Vector2) -> void:
+	if screen_delta.length() < 1.0:
+		return
+	var right := screen_delta.x > 0.0 if absf(screen_delta.x) > 0.5 else facing_right
+	facing_right = right
+	scale = Vector2(BODY_SCALE if right else -BODY_SCALE, BODY_SCALE)
+	if absf(screen_delta.y) > absf(screen_delta.x) * 0.9:
+		view = VIEW_FRONT if screen_delta.y > 0.0 else VIEW_BACK
+	else:
+		view = VIEW_SIDE
+
+
+## Ракурс при ходьбе: движение по экрану вверх/вниз (W/S) — спиной/лицом к зрителю, иначе боком по направлению шага.
+func walk_toward(screen_delta: Vector2) -> void:
+	if screen_delta.length() < 0.001:
+		return
+	if absf(screen_delta.y) > absf(screen_delta.x) * 1.2:
+		view = VIEW_FRONT if screen_delta.y > 0.0 else VIEW_BACK
+	else:
+		set_facing(screen_delta.x > 0.0)
+
+
+## Фактический ракурс: при затяжке и шланге в руке рисуем боком (руки и шланг рассчитаны на профиль).
+func effective_view() -> String:
+	if puffing or holding or _hand_t > 0.02 or idle_dance:
+		return VIEW_SIDE
+	return view
 
 
 ## Рот в координатах родителя (для дыма).
@@ -141,6 +199,10 @@ func _shoe(foot: Vector2) -> void:
 
 
 func _draw() -> void:
+	var current := effective_view()
+	if current != VIEW_SIDE:
+		_draw_front_back(current == VIEW_FRONT)
+		return
 	if pose == POSE_SIT:
 		_draw_seated()
 	else:
@@ -261,3 +323,93 @@ func _seated_arm(shoulder: Vector2, rest: Vector2, near: bool) -> void:
 	_limb(shoulder, elbow, 5.2, tone)
 	_limb(elbow, hand, 4.8, tone)
 	draw_circle(hand, 2.8, skin if near else skin.darkened(0.2))
+
+
+## Ракурс «лицом» / «спиной»: симметричная фигура. Положение рта/руки для шланга и дыма — как в профиле
+## (в этих ракурсах человек не курит и не держит шланг).
+func _draw_front_back(front: bool) -> void:
+	var seated := pose == POSE_SIT
+	var bob: float = _bob()
+	var hip := Vector2(0.0, -24.0 if seated else -23.0 + bob)
+	var shoulder := Vector2(0.0, -46.0 + bob if seated else -43.0 + bob)
+	var torso: Color = jacket if jacket.a > 0.0 else shirt
+	# Ноги.
+	for side: float in [-1.0, 1.0]:
+		var top := hip + Vector2(3.6 * side, 0.0)
+		if seated:
+			var knee := top + Vector2(0.8 * side, 11.0)
+			var foot := knee + Vector2(0.0, 12.0)
+			_limb(top, knee, 7.5, pants)
+			draw_circle(knee, 4.4, pants.lightened(0.06))
+			_limb(knee, foot, 6.3, pants.darkened(0.12))
+			_front_shoe(foot, front)
+		else:
+			var foot := Vector2(3.6 * side, 0.0)
+			if moving:
+				# Шаг: поднятая нога по очереди, лёгкое смещение вглубь.
+				var leg_phase := _phase + (PI if side > 0.0 else 0.0)
+				foot.y = -maxf(0.0, sin(leg_phase)) * 4.0 + cos(leg_phase) * 1.2
+			_limb(top, foot + Vector2(0, -2.0), 6.8, pants)
+			_front_shoe(foot, front)
+	# Руки вдоль тела (за торсом).
+	var sleeve: Color = jacket if jacket.a > 0.0 else shirt
+	for side: float in [-1.0, 1.0]:
+		var sh := shoulder + Vector2(7.2 * side, 3.0)
+		var hand := sh + Vector2(1.6 * side, 15.0)
+		if seated:
+			hand = sh + Vector2(1.0 * side, 14.0)
+		elif moving:
+			# Руки качаются противоходом ногам.
+			hand.y += sin(_phase + (0.0 if side > 0.0 else PI)) * 3.5
+		_limb(sh, sh.lerp(hand, 0.5) + Vector2(0.6 * side, 0.0), 5.2, sleeve.darkened(0.1))
+		_limb(sh.lerp(hand, 0.5), hand, 4.8, sleeve.darkened(0.1))
+		draw_circle(hand, 2.8, skin)
+	# Торс.
+	_limb(hip, shoulder + Vector2(0, 2.0), 15.0, torso.darkened(0.08))
+	_limb(hip, shoulder + Vector2(0, 2.0), 12.0, torso)
+	draw_line(hip + Vector2(-7.0, -1.0), hip + Vector2(7.0, -1.0), pants.darkened(0.35), 2.0)
+	var head := _head_local()
+	head.x = 0.0
+	if front:
+		if jacket.a > 0.0:
+			draw_colored_polygon(PackedVector2Array([
+				shoulder + Vector2(-2.6, 3.5), shoulder + Vector2(2.6, 3.5), hip + Vector2(0.0, -4.0)]), shirt)
+			draw_line(shoulder + Vector2(0.0, 5.0), hip + Vector2(0.0, -6.0), tie, 2.2)
+		if lanyard:
+			var chest := shoulder + Vector2(0.0, 11.0)
+			var strap := Color("#15151a")
+			draw_line(shoulder + Vector2(-3.0, 2.0), chest, strap, 1.3, true)
+			draw_line(shoulder + Vector2(3.0, 2.0), chest, strap, 1.3, true)
+			draw_circle(chest, 1.3, Color("#cfd4dc"))
+			if not piece_hidden:
+				HookahArt.draw_mouthpiece(self, chest + Vector2(0.0, 1.0), Vector2.DOWN, piece_color, 0.42)
+	else:
+		if jacket.a > 0.0:
+			draw_line(shoulder + Vector2(0.0, 3.0), hip + Vector2(0.0, -5.0), jacket.darkened(0.25), 1.2)
+		if lanyard:
+			draw_line(shoulder + Vector2(-3.0, 0.0), shoulder + Vector2(3.0, 0.0), Color("#15151a"), 1.3, true)
+	_limb(shoulder + Vector2(0, 1.0), head + Vector2(0, 5.0), 5.0, skin.darkened(0.08))
+	if front:
+		draw_circle(head + Vector2(0.0, -2.0), 8.6, hair)
+		draw_circle(head + Vector2(0.0, 1.0), 7.3, skin)
+		draw_colored_polygon(PackedVector2Array([
+			head + Vector2(-7.4, -2.0), head + Vector2(-3.0, -7.6), head + Vector2(3.0, -7.6),
+			head + Vector2(7.4, -2.0), head + Vector2(3.0, -4.4), head + Vector2(-3.0, -4.4)]), hair.lightened(0.05))
+		draw_circle(head + Vector2(-8.0, 1.0), 1.7, skin.darkened(0.06))
+		draw_circle(head + Vector2(8.0, 1.0), 1.7, skin.darkened(0.06))
+		draw_circle(head + Vector2(-2.8, 0.2), 1.2, Color("#1b1b1b"))
+		draw_circle(head + Vector2(2.8, 0.2), 1.2, Color("#1b1b1b"))
+		draw_line(head + Vector2(-1.8, 4.6), head + Vector2(1.8, 4.6), Color("#8a4b3a"), 1.2)
+	else:
+		draw_circle(head + Vector2(0.0, -0.5), 8.9, hair)
+		draw_circle(head + Vector2(-8.0, 2.0), 1.6, skin.darkened(0.06))
+		draw_circle(head + Vector2(8.0, 2.0), 1.6, skin.darkened(0.06))
+		draw_arc(head + Vector2(0.0, -0.5), 6.0, 0.4, 2.7, 10, hair.lightened(0.12), 1.0)
+
+
+func _front_shoe(foot: Vector2, front: bool) -> void:
+	var toe := 1.5 if front else -0.5
+	draw_colored_polygon(PackedVector2Array([
+		foot + Vector2(-3.8, -3.5), foot + Vector2(3.8, -3.5), foot + Vector2(4.2, toe + 1.5),
+		foot + Vector2(-4.2, toe + 1.5)]), shoes)
+	draw_line(foot + Vector2(-4.2, toe + 1.2), foot + Vector2(4.2, toe + 1.2), shoes.darkened(0.45), 1.4)

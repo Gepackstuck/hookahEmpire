@@ -25,6 +25,32 @@
         "facing": "right",
         "lift": 10
       }
+    },
+    {
+      "id": "max_arrives",
+      "requires_progress": "friend_01_done",
+      "delay": 4.0,
+      "action": "spawn_friend",
+      "guest": "friend_max",
+      "entry_position": [
+        0.3,
+        7.5
+      ],
+      "entry_cell": [
+        1,
+        7
+      ],
+      "stand_cell": [
+        12,
+        10
+      ],
+      "dialogue": "friend_max_intro",
+      "sets_progress": "friend_02_arrives",
+      "seat": {
+        "emoji": "🧘‍♂️",
+        "facing": "right",
+        "lift": 10
+      }
     }
   ]
 }

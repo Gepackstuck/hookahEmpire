@@ -1,0 +1,43 @@
+{
+  "_comment": "Оценка гостевой сессии (M6, docs/GDD.md §7.3): ContextScore = веса * (RecipeQuality, GuestFit, TrendFit, ExecutionScore); FinalScore = clamp(ContextScore - HeatPenalty - ServicePenalty). Все числа правятся без изменения кода.",
+  "context_weights": {
+    "recipe_quality": 0.45,
+    "guest_fit": 0.25,
+    "trend_fit": 0.15,
+    "execution": 0.15
+  },
+  "fit": {
+    "gain": 1.0,
+    "dislike_penalty": 60,
+    "no_preference_fit": 50
+  },
+  "trend": {
+    "current": "neutral",
+    "neutral_fit": 50,
+    "scale": 50,
+    "trends": {
+      "neutral": {
+        "name": "Без тренда",
+        "dimensions": {}
+      },
+      "fresh_fruit": {
+        "name": "Свежее и фруктовое",
+        "dimensions": { "fresh": 1.0, "fruit": 1.0, "creamy": -0.8, "heavy": -0.5 }
+      }
+    }
+  },
+  "likes_min": 55,
+  "bands": [
+    { "min": 80, "id": "love", "emoji": "😍", "name": "Восторг", "reputation": 2 },
+    { "min": 65, "id": "like", "emoji": "😊", "name": "Понравилось", "reputation": 1 },
+    { "min": 55, "id": "okay", "emoji": "🙂", "name": "Нормально", "reputation": 0 },
+    { "min": 40, "id": "meh", "emoji": "😕", "name": "Так себе", "reputation": -1 },
+    { "min": 0, "id": "dislike", "emoji": "🤢", "name": "Не понравилось", "reputation": -2 }
+  ],
+  "payment": {
+    "max": 600,
+    "min": 0,
+    "exponent": 1.5,
+    "round_to": 5
+  }
+}

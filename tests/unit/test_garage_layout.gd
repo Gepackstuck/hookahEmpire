@@ -71,9 +71,9 @@ func test_real_layout_actions_and_rects() -> void:
 		by_id[object["id"]] = object
 	assert_eq(by_id["table_test"]["interaction"]["action"], "open_mixer")
 	assert_eq(by_id["recipe_book"]["interaction"]["action"], "open_recipe_book")
-	assert_true(not by_id["recipe_book"]["blocks"])
+	assert_eq(by_id["recipe_book"]["visual"]["type"], "wall_book")
+	assert_true(by_id["recipe_book"]["blocks"], "книга висит на стене")
 	assert_eq(by_id["table_test"]["size"], Vector2i(4, 2))
-	assert_true(by_id["recipe_book"]["visual"].get("glow", false))
 	assert_eq(by_id["table_hookah"]["interaction"]["action"], "open_preparation")
 	assert_true(by_id["table_hookah"]["blocks"])
 	assert_true(not by_id["hookah_test"]["blocks"], "кальян стоит на столе")
@@ -123,7 +123,7 @@ func test_shelf_and_neon_sign_in_real_layout() -> void:
 	assert_eq(by_id["shelf_hookah"]["visual"]["type"], "shelf")
 	assert_true(by_id["shelf_hookah"]["visual"]["props"].size() >= 5, "на полке есть банки и мелочь")
 	var slots: Dictionary = by_id["shelf_hookah"]["visual"]["hookah_slots"]
-	assert_true(slots["rows"].size() * int(slots["count"]) >= 12, "на полке много кальянов")
+	assert_true(slots["rows"].size() * int(slots["count"]) >= 3, "на полке 3 кальяна")
 	var blinking := 0
 	for line in by_id["sign_neon"]["visual"]["lines"]:
 		if bool(line.get("blink", false)):
@@ -162,3 +162,31 @@ func test_prep_hookah_object_and_table_colors_do_not_clash_with_shelf() -> void:
 	for prop in by_id["table_test"]["visual"]["props"]:
 		if prop["type"] == "hookah":
 			assert_true(not HookahArt.PALETTE.has(str(prop["color"])), "цвет кальяна на столе-смесителе не из палитры полки")
+
+
+func test_shelf_has_masks_and_books_and_signs_are_lowered() -> void:
+	var layout := GarageLayout.load_file(LAYOUT_PATH)
+	var by_id := {}
+	for object in layout.objects:
+		by_id[object["id"]] = object
+	var kinds := []
+	for prop in by_id["shelf_hookah"]["visual"]["props"]:
+		kinds.append(str(prop["type"]))
+	assert_true(kinds.count("image") >= 3, "на полке картинки: серая маска и 2 книги")
+	assert_true(float(by_id["sign_neon"]["visual"]["z"]) < 40.0, "неоновая вывеска опущена к середине стены")
+	assert_true(float(by_id["sign_script"]["visual"]["z"]) < 40.0, "вывеска у двери опущена к середине стены")
+
+
+func test_scroll_does_not_overlap_shelf_and_props_are_viewable() -> void:
+	var layout := GarageLayout.load_file(LAYOUT_PATH)
+	var by_id := {}
+	for object in layout.objects:
+		by_id[object["id"]] = object
+	var book: Dictionary = by_id["recipe_book"]
+	var shelf: Dictionary = by_id["shelf_hookah"]
+	assert_true(book["cell"].x + book["size"].x <= shelf["cell"].x, "свиток левее полки")
+	for prop in shelf["visual"]["props"]:
+		if str(prop["type"]) == "image":
+			assert_true(str(prop.get("view_texture", "")) != "", "у картинки есть увеличенная версия")
+			assert_true(FileAccess.file_exists(str(prop["view_texture"])), "файл увеличенной версии существует")
+	assert_true(ImageViewer.load_texture("res://art/props/nope.png") == null)

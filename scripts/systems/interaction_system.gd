@@ -22,6 +22,16 @@ func register(data: InteractableData) -> void:
 	_items.append(data)
 
 
+## Убирает объект взаимодействия (например, гость ушёл).
+func unregister(interactable_id: String) -> void:
+	for item in _items.duplicate():
+		if item.id == interactable_id:
+			_items.erase(item)
+	if _focus != null and _focus.id == interactable_id:
+		_focus = null
+		focus_changed.emit(null)
+
+
 func update_focus(player_pos: Vector2) -> void:
 	var best: InteractableData = null
 	var best_distance := INF

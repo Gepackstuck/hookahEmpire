@@ -3,8 +3,8 @@ extends RefCounted
 ## Загрузка и валидация data-описания гаража (data/garage/*.json).
 ## Ошибки копятся в errors; is_valid() == false означает, что layout использовать нельзя.
 
-const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah"]
-const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box"]
+const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah", "sink", "wall_book"]
+const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box", "mask", "books", "image"]
 
 var id: String = ""
 var size: Vector2i = Vector2i.ZERO
@@ -248,7 +248,13 @@ func _validate_hookah_slots(raw: Variant) -> String:
 	for row in rows:
 		if not (row is Dictionary) or not (row.get("z") is float or row.get("z") is int):
 			return "каждый ряд — {z: число}"
-	if not (raw.get("count") is float or raw.get("count") is int) or int(raw["count"]) < 1:
+	if raw.has("colors"):
+		if not (raw["colors"] is Array) or raw["colors"].is_empty():
+			return "colors должен быть непустым массивом цветов"
+		for color in raw["colors"]:
+			if not Color.html_is_valid(str(color)):
+				return "некорректный цвет в colors"
+	elif not (raw.get("count") is float or raw.get("count") is int) or int(raw["count"]) < 1:
 		return "count должен быть числом >= 1"
 	if not (raw.get("span") is float or raw.get("span") is int) or float(raw["span"]) <= 0.0:
 		return "span должен быть положительным числом"

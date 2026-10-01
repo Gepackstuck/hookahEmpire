@@ -78,15 +78,17 @@ static func _bezier(points: Array) -> PackedVector2Array:
 
 ## Кальян: origin — точка на поверхности под центром колбы. squash — «затяжка» (0..1) приседает кальян.
 ## with_hose — рисовать длинный шланг (на столе; в руках и на полке кальян без шланга).
-static func draw_hookah(canvas: CanvasItem, origin: Vector2, color: Color, with_hose: bool = true, squash: float = 0.0, handle_style: int = 0) -> void:
+## top — что стоит на кальяне: 0 — только тарелка (кальян не забит), 1 — чаша без углей, 2 — чаша с углями.
+## Вода в колбе (и пузырьки при затяжке, squash > 0) — только у забитого кальяна (top >= 1).
+static func draw_hookah(canvas: CanvasItem, origin: Vector2, color: Color, with_hose: bool = true, squash: float = 0.0, handle_style: int = 0, tilt: float = 0.0, top: int = 0) -> void:
 	var stretch := Vector2(SCALE * (1.0 + 0.04 * squash), SCALE * (1.0 - 0.06 * squash))
-	canvas.draw_set_transform(origin, 0.0, stretch)
-	_draw_hookah_shape(canvas, color, with_hose, Transform2D(0.0, stretch, 0.0, origin), handle_style)
+	canvas.draw_set_transform(origin, tilt, stretch)
+	_draw_hookah_shape(canvas, color, with_hose, Transform2D(tilt, stretch, 0.0, origin), handle_style, top, squash)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Стройный кальян: тонкая стеклянная колба-колокол, чёрная шахта с «пузырями», тарелка, чаша, клапан.
-static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool, base: Transform2D = Transform2D.IDENTITY, handle_style: int = 0) -> void:
+static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool, base: Transform2D = Transform2D.IDENTITY, handle_style: int = 0, top: int = 0, bubbling: float = 0.0) -> void:
 	var black := Color("#1c1d22")
 	var steel := Color("#c9ced6")
 	var p := Vector2.ZERO
@@ -108,6 +110,8 @@ static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool
 		inner.append(p + Vector2(-float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
 	canvas.draw_colored_polygon(outer, color.darkened(0.45))
 	canvas.draw_colored_polygon(inner, color)
+	if top >= 1:
+		_draw_water(canvas, p, color, bubbling)
 	var pattern := color.lightened(0.4)
 	pattern.a = 0.55
 	for spot: Vector2 in [Vector2(-3, -17), Vector2(3, -13), Vector2(-5, -5), Vector2(1, -4), Vector2(6, -6)]:
@@ -125,15 +129,59 @@ static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool
 	# Тарелка, чаша, уголёк.
 	_ellipse(canvas, p + Vector2(0, -57), 11.0, 4.0, black)
 	_ellipse(canvas, p + Vector2(0, -58), 9.8, 3.1, Color("#33363e"))
-	canvas.draw_colored_polygon(PackedVector2Array([p + Vector2(-4, -58), p + Vector2(4, -58), p + Vector2(3.2, -66), p + Vector2(-3.2, -66)]), color.darkened(0.15))
-	_ellipse(canvas, p + Vector2(0, -66), 3.8, 1.6, color.lightened(0.3))
-	_ellipse(canvas, p + Vector2(0, -67), 2.1, 0.9, Color("#ff6a2a"))
+	if top >= 1:
+		_bowl_shape(canvas, p + Vector2(0, -58), color, top >= 2)
 	if with_hose:
 		var hose_front := _bezier([p + Vector2(18, 0), p + Vector2(6, 8), p + Vector2(-11, 9), p + Vector2(-19, 3)])
 		canvas.draw_polyline(hose_front, color.darkened(0.45), 2.9, true)
 		canvas.draw_polyline(hose_front, color, 1.7, true)
 		# Ручка на конце шланга (как у остальных кальянов), лежит на столе влево-вниз; длина ~11 px на экране.
 		draw_handle(canvas, p + Vector2(-19, 3), Vector2(-1.0, 0.25).normalized(), handle_style, 11.0 / 22.0 / SCALE, base)
+
+
+## Вода в колбе (светлая заливка до уровня -15); при затяжке (bubbling > 0) поднимаются пузырьки.
+static func _draw_water(canvas: CanvasItem, p: Vector2, color: Color, bubbling: float) -> void:
+	var levels: Array = [[-15.0, 6.2], [-14.0, 6.0], [-10.0, 5.6], [-6.0, 7.5], [-2.0, 10.1], [0.0, 10.9]]
+	var water := PackedVector2Array()
+	for point: Array in levels:
+		water.append(p + Vector2(float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
+	for i in range(levels.size() - 1, -1, -1):
+		var point: Array = levels[i]
+		water.append(p + Vector2(-float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
+	var tint := color.lightened(0.55)
+	tint.a = 0.6
+	canvas.draw_colored_polygon(water, tint)
+	canvas.draw_line(p + Vector2(-4.5, -15.0), p + Vector2(4.5, -15.0), Color(1, 1, 1, 0.6), 0.9)
+	if bubbling <= 0.05:
+		return
+	var t := float(Time.get_ticks_msec()) / 1000.0
+	for k in 7:
+		var phase := fposmod(t * 2.6 + float(k) * 0.143, 1.0)
+		var x := sin(t * 3.1 + float(k) * 1.9) * 3.6
+		var y := lerpf(-4.0, -14.2, phase)
+		var radius := 0.6 + 0.35 * float(k % 3)
+		canvas.draw_circle(p + Vector2(x, y), radius, Color(1, 1, 1, 0.85 * (1.0 - phase * 0.45)))
+		canvas.draw_arc(p + Vector2(x, y), radius, 0.0, TAU, 8, Color(0.4, 0.6, 0.8, 0.5), 0.5)
+
+
+## Чаша: цветной конус с ободком; с углями (coals) — раскалённые угольки, без — табак.
+static func _bowl_shape(canvas: CanvasItem, at: Vector2, color: Color, coals: bool) -> void:
+	canvas.draw_colored_polygon(PackedVector2Array([at + Vector2(-4, 0), at + Vector2(4, 0), at + Vector2(3.2, -8), at + Vector2(-3.2, -8)]), color.darkened(0.15))
+	_ellipse(canvas, at + Vector2(0, -8), 3.8, 1.6, color.lightened(0.3))
+	if coals:
+		_ellipse(canvas, at + Vector2(0, -9), 2.5, 1.0, Color("#3a3a40"))
+		_ellipse(canvas, at + Vector2(-0.8, -9.2), 1.2, 0.6, Color("#ff6a2a"))
+		_ellipse(canvas, at + Vector2(1.1, -8.8), 0.9, 0.5, Color("#ffb347"))
+	else:
+		_ellipse(canvas, at + Vector2(0, -8.6), 2.4, 1.0, color.darkened(0.55))
+
+
+## Чаша отдельно (лежит на столе, пока в неё кладут угли): p — точка под дном чаши.
+static func draw_bowl(canvas: CanvasItem, p: Vector2, color: Color, coals: bool) -> void:
+	canvas.draw_set_transform(p, 0.0, Vector2(SCALE, SCALE))
+	_ellipse(canvas, Vector2(0, 1), 5.0, 1.6, Color(0, 0, 0, 0.22))
+	_bowl_shape(canvas, Vector2.ZERO, color, coals)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Низкая круглая жестяная банка: светлое тело, тёмная крышка и цветная лента-этикетка.

@@ -16,8 +16,17 @@ func test_goal_sequence() -> void:
 	assert_eq(ObjectiveTracker.current(_ctx({"recipe_count": 0}))["target"], "table_test")
 	assert_eq(ObjectiveTracker.current(_ctx())["target"], "table_hookah")
 	assert_eq(ObjectiveTracker.current(_ctx({"station_state": HookahStation.STATE_LIKED}))["text"], "", "покурить вместе — не задание")
-	assert_eq(ObjectiveTracker.current(_ctx({"station_state": HookahStation.STATE_DISLIKED}))["target"], "table_guest")
-	assert_eq(ObjectiveTracker.current(_ctx({"station_state": HookahStation.STATE_DISLIKED, "hookah_at_prep": true}))["target"], "table_hookah")
+	assert_eq(ObjectiveTracker.current(_ctx({"station_state": HookahStation.STATE_DISLIKED}))["text"], "", "недовольный гость уходит — заданий нет")
+
+
+func test_day_over_and_guest_name() -> void:
+	var waiting := _ctx({"friend_ready": false, "has_friend": false, "day_over": true})
+	assert_eq(ObjectiveTracker.current(waiting)["text"], "✔ Гости на сегодня закончились")
+	var walking := _ctx({"friend_ready": false, "has_friend": true, "day_over": true})
+	assert_eq(ObjectiveTracker.current(walking)["text"], "⏳ Скоро придёт гость…", "гость идёт — день не окончен")
+	var talk := ObjectiveTracker.current(_ctx({"order_known": false, "friend_name": "Макс", "friend_id": "friend_max"}))
+	assert_true(str(talk["text"]).contains("Макс"))
+	assert_eq(talk["target"], "friend_max")
 
 
 func test_no_goal_when_busy_or_done() -> void:

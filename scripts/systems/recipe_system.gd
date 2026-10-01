@@ -123,6 +123,32 @@ func record_preparation(recipe_id: String, execution_score: float) -> bool:
 	return true
 
 
+## Записывает итог гостевой сессии: последняя и лучшая итоговая оценка рецепта (FinalScore) и гость.
+## Старые записи без этих полей читаются через get() с NO_EXECUTION как "нет результата".
+func record_session(recipe_id: String, final_score: float, guest_id: String, payment: int) -> bool:
+	if not _state.recipes.has(recipe_id):
+		return false
+	var recipe: Dictionary = _state.recipes[recipe_id]
+	recipe["last_final"] = final_score
+	recipe["last_guest"] = guest_id
+	recipe["last_payment"] = payment
+	recipe["best_final"] = maxf(float(recipe.get("best_final", NO_EXECUTION)), final_score)
+	recipe["sessions"] = int(recipe.get("sessions", 0)) + 1
+	recipe_updated.emit(recipe_id)
+	return true
+
+
+## Состав для карточек: "Клубника 50% · Ваниль 50%" (+ "Ледяная нотка ❄️").
+func composition_text(recipe: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	for item in recipe["ingredients"]:
+		var percent := int(round(float(item["units"]) / float(config.total_units) * 100.0))
+		parts.append("%s %d%%" % [catalog.label(item["id"]), percent])
+	if recipe["modifiers"].has("ice"):
+		parts.append("Ледяная нотка ❄️")
+	return " · ".join(parts)
+
+
 func get_recipe(recipe_id: String) -> Dictionary:
 	return _state.recipes.get(recipe_id, {})
 

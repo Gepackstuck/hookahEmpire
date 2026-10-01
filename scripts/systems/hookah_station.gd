@@ -1,8 +1,8 @@
 class_name HookahStation
 extends RefCounted
-## Состояние кальяна на столе для приготовления (временная логика до заказов гостей в M6).
-## Кальян можно забить один раз; перезабить можно только если гость остался недоволен.
-## Забитый кальян можно курить (игроку и, если ему понравилось, гостю).
+## Состояние кальяна на столе: пустой -> забит -> гость оценил. Кальян забивается один раз за сессию:
+## перезабить недовольному гостю нельзя (M6: он уходит с низкой оплатой; повтор — по плану M7).
+## Забитый кальян можно курить (игроку и, если гостю понравилось, ему тоже).
 
 const STATE_EMPTY := "empty"
 const STATE_PREPARED := "prepared" # забит, гостя рядом не было
@@ -17,7 +17,7 @@ var guest_id: String = ""
 var last_emotion: String = ""
 
 
-## result — результат PreparationService, verdict — результат GuestReaction.evaluate (пустой, если гостя нет).
+## result — результат PreparationService, verdict — результат SessionScoring.evaluate (пустой, если гостя нет).
 func apply_result(result: Dictionary, verdict: Dictionary) -> void:
 	last_result = result
 	last_emotion = ""
@@ -38,7 +38,7 @@ func reset() -> void:
 
 
 func can_prepare() -> bool:
-	return state == STATE_EMPTY or state == STATE_DISLIKED
+	return state == STATE_EMPTY
 
 
 func can_smoke() -> bool:
@@ -54,8 +54,6 @@ func prompt() -> String:
 	match state:
 		STATE_EMPTY:
 			return "Приготовить кальян"
-		STATE_DISLIKED:
-			return "Перезабить кальян"
 		_:
 			return "Покурить"
 

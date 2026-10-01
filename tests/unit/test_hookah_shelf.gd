@@ -19,23 +19,28 @@ func _drop(shelf: GarageObject) -> void:
 	shelf.free()
 
 
-func test_shelf_has_many_hookahs() -> void:
+func test_shelf_has_three_hookahs() -> void:
 	var shelf := _make_shelf()
-	assert_eq(shelf.hookah_slot_count(), 14)
-	assert_eq(shelf.free_hookah_slots().size(), 14)
+	assert_eq(shelf.hookah_slot_count(), 3)
+	assert_eq(shelf.free_hookah_slots().size(), 3)
+	assert_eq(shelf.hookah_slot_color(0), Color("#22b8ff"))
+	assert_eq(shelf.hookah_slot_color(1), Color("#ff7a1a"))
+	assert_eq(shelf.hookah_slot_color(2), Color("#7bd62f"))
+	shelf.restock_hookahs()
+	assert_eq(shelf.hookah_slot_color(0), Color("#22b8ff"), "цвета на полке всегда одинаковые")
 	_drop(shelf)
 
 
 func test_take_hookah_empties_only_that_slot() -> void:
 	var shelf := _make_shelf()
-	var color := shelf.hookah_slot_color(5)
-	shelf.take_hookah(5)
-	assert_true(shelf.is_hookah_slot_taken(5))
-	assert_eq(shelf.free_hookah_slots().size(), 13)
-	assert_true(not shelf.free_hookah_slots().has(5))
-	assert_true(HookahArt.PALETTE.has(color.to_html(false).insert(0, "#")), "цвет взят из яркой палитры")
+	var color := shelf.hookah_slot_color(1)
+	shelf.take_hookah(1)
+	assert_true(shelf.is_hookah_slot_taken(1))
+	assert_eq(shelf.free_hookah_slots().size(), 2)
+	assert_true(not shelf.free_hookah_slots().has(1))
+	assert_eq(color, Color("#ff7a1a"))
 	shelf.restock_hookahs()
-	assert_eq(shelf.free_hookah_slots().size(), 14, "после пополнения все слоты заняты")
+	assert_eq(shelf.free_hookah_slots().size(), 3, "после пополнения все слоты заняты")
 	_drop(shelf)
 
 
@@ -85,13 +90,18 @@ func test_mouthpiece_box_gives_random_pieces_and_empties() -> void:
 		if object["id"] == "table_guest":
 			(Engine.get_main_loop() as SceneTree).root.add_child(table)
 			table.setup(object)
-	assert_eq(table.box_piece_count(), GarageObject.BOX_PIECE_COUNT)
+	assert_eq(table.box_piece_count(), 2, "в коробке изначально 2 мундштука")
 	var color := table.take_box_piece()
 	assert_true(color.a > 0.0)
-	assert_eq(table.box_piece_count(), GarageObject.BOX_PIECE_COUNT - 1, "мундштук пропал из коробки")
-	for i in GarageObject.BOX_PIECE_COUNT:
-		table.take_box_piece()
+	assert_eq(table.box_piece_count(), 1, "мундштук пропал из коробки")
+	table.take_box_piece()
+	assert_eq(table.box_piece_count(), 0)
+	table.take_box_piece()
 	assert_true(table.box_piece_count() > 0, "пустая коробка пополняется")
+	table.restock_box()
+	assert_eq(table.box_piece_count(), GarageObject.BOX_PIECE_COUNT)
+	table.restock_box(3)
+	assert_eq(table.box_piece_count(), 3)
 	(Engine.get_main_loop() as SceneTree).root.remove_child(table)
 	table.free()
 

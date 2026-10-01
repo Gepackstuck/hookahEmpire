@@ -8,6 +8,7 @@ signal friend_inhaled(guest_id: String)
 signal message_requested(text: String)
 signal dialogue_requested(dialogue_id: String)
 signal action_requested(action_id: String)
+signal image_requested(texture_path: String, title: String, description: String)
 signal friend_arrived(guest_id: String)
 
 const LAYOUT_PATH := "res://data/garage/garage_main.json"
@@ -17,6 +18,10 @@ const DOOR_OBJECT_ID := "door_main"
 const HOOKAH_OBJECT_ID := "hookah_test"
 const HOOKAH_PREP_OBJECT_ID := "hookah_prep"
 const SHELF_OBJECT_ID := "shelf_hookah"
+const GAZE_RADIUS := 2.6
+const SINK_OBJECT_ID := "sink_wash"
+const WASH_MIN_SECONDS := 3.0
+const WASH_MAX_SECONDS := 5.0
 ## Где шланг лежит на столе для кальянов (от основания кальяна): в свободном заднем правом углу, между предметами.
 const PREP_HOSE_START := Vector2(10.0, 0.0)
 const PREP_HOSE_END := Vector2(40.0, 12.0)
@@ -59,6 +64,8 @@ var _marker_target_id := ""
 var _marker_time := 0.0
 var _input_locked := false
 var _pending_blocks: Array[Rect2i] = [] # клетки, которые займут NPC, когда игрок выйдет из них
+## guest_id -> {"entry_position", "entry_cell", "stand_cell"}: откуда пришёл гость и где сидит (чтобы уйти тем же путём).
+var _guest_routes: Dictionary = {}
 
 @onready var _backdrop: GarageBackdrop = %Backdrop
 @onready var _entities: Node2D = %Entities
@@ -91,7 +98,8 @@ func _ready() -> void:
 	_hose = HoseLine.new()
 	add_child(_hose)
 	_player.stood_up.connect(_on_player_stood_up)
-	_player.set_camera_limits(GarageBackdrop.screen_bounds(layout.size))
+	_camera_bounds = GarageBackdrop.screen_bounds(layout.size)
+	_player.set_camera_limits(_camera_bounds)
 
 	_marker = Label.new()
 	_marker.text = "⬇️"
@@ -114,9 +122,95 @@ func _process(delta: float) -> void:
 	_update_hose(delta)
 	_interactions.update_focus(_player.grid_position)
 	_update_marker(delta)
+	_update_gazes()
+	_update_pointer_hover()
+
+
+## Кальянщик, стоя спокойно рядом с севшим гостем, поворачивается к нему (лицом/спиной/боком); иначе — профиль.
+func _update_gazes() -> void:
+	var partner: Friend = null
+	for node in _objects.values():
+		if node is Friend and (node as Friend).has_arrived:
+			var friend := node as Friend
+			if friend.grid_position.distance_to(_player.grid_position) <= GAZE_RADIUS:
+				partner = friend
+				break
+	for node in _objects.values():
+		if node is Friend and node != partner and (node as Friend).has_arrived:
+			(node as Friend).look_straight()
+	if partner != null and _player.is_idle() and not _player.seated and not _player.is_carrying_hookah():
+		# Сидящий гость остаётся в профиле (сидит на стуле как обычно); поворачивается только кальянщик.
+		partner.look_straight()
+		_player.look_toward(partner.position - _player.position)
+	elif partner != null:
+		partner.look_straight()
+
+
+## Мышь: предметы с картинками (маски, книги) и свиток подсвечиваются при наведении, клик — смотреть/открыть.
+var _camera_bounds := Rect2i()
+var _pointer_enabled := true
+var _hover_object: GarageObject = null
+var _hover_hit: Dictionary = {}
+
+
+## true — камера ходит за кальянщиком; false — стоит по центру помещения.
+func set_camera_follow(follow: bool) -> void:
+	if _player != null:
+		_player.set_camera_follow(follow, _camera_bounds)
+
+
+func set_pointer_enabled(value: bool) -> void:
+	_pointer_enabled = value
+	if not value:
+		_clear_hover()
+
+
+func _clear_hover() -> void:
+	if _hover_object != null and is_instance_valid(_hover_object):
+		_hover_object.set_hover({})
+	_hover_object = null
+	_hover_hit = {}
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
+func _update_pointer_hover() -> void:
+	if not _pointer_enabled:
+		return
+	var mouse := get_global_mouse_position()
+	var found: GarageObject = null
+	var hit: Dictionary = {}
+	for node in _objects.values():
+		if node is GarageObject and (node as GarageObject).visible:
+			var candidate := node as GarageObject
+			var result := candidate.hit_test(candidate.to_local(mouse))
+			if not result.is_empty():
+				found = candidate
+				hit = result
+				break
+	if found != _hover_object and _hover_object != null and is_instance_valid(_hover_object):
+		_hover_object.set_hover({})
+	_hover_object = found
+	_hover_hit = hit
+	if found != null:
+		found.set_hover(hit)
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND)
+	else:
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _pointer_enabled and _hover_object != null and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var kind := str(_hover_hit.get("kind", ""))
+		if kind == "image":
+			image_requested.emit(str(_hover_hit["texture"]), str(_hover_hit["title"]), str(_hover_hit.get("description", "")))
+		elif kind == "book":
+			action_requested.emit("open_recipe_book")
+		get_viewport().set_input_as_handled()
+		return
+	_handle_key_input(event)
+
+
+func _handle_key_input(event: InputEvent) -> void:
 	if _player != null and _player.seated and not _sitting_busy and not _input_locked and event.is_action_pressed("interact"):
 		_player.stand_up()
 		get_viewport().set_input_as_handled()
@@ -142,6 +236,10 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	if _grid == null:
 		GameLog.error("garage", "spawn_friend: гараж не загружен")
 		return false
+	# Клетка стула могла остаться заблокированной после предыдущего гостя.
+	var stand_rect := Rect2i(stand_cell, Vector2i.ONE)
+	_pending_blocks.erase(stand_rect)
+	_grid.set_blocked_rect(stand_rect, false)
 	var path := _grid.find_path(entry_cell, stand_cell)
 	if path.is_empty():
 		GameLog.error("garage", "spawn_friend: нет пути от %s до %s" % [str(entry_cell), str(stand_cell)])
@@ -151,6 +249,8 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	var friend := FRIEND_SCENE.instantiate() as Friend
 	_entities.add_child(friend)
 	friend.setup(str(guest["id"]), str(guest["emoji"]), entry_position, str(guest.get("sprite_faces", "right")) == "right")
+	friend.apply_look(guest.get("look", {}))
+	_guest_routes[friend.guest_id] = {"entry_position": entry_position, "entry_cell": entry_cell, "stand_cell": stand_cell}
 	_objects[friend.guest_id] = friend
 	friend.inhale_started.connect(_on_inhale)
 	# Игрок и гость не тянут кальян одновременно: между их затяжками есть пауза.
@@ -177,6 +277,237 @@ func _enter_through_door(friend: Friend, path: Array[Vector2]) -> void:
 	friend.walk_path(path)
 	await get_tree().create_timer(1.3).timeout
 	await (door as GarageObject).set_door_open(false, 0.45)
+
+
+## Реплика над головой персонажа ("player" или id гостя); возвращает длительность показа (0 — некому говорить).
+func say(who: String, text: String, emoji: String = "") -> float:
+	# Говорит один: облачка собеседников не должны перекрываться.
+	if who != "player" and _player != null:
+		_player.clear_speech()
+	for key in _objects:
+		var other: Variant = _objects[key]
+		if other is Friend and str(key) != who:
+			(other as Friend).clear_speech()
+	if who == "player" and _player != null:
+		return _player.say(text)
+	var node: Variant = _objects.get(who)
+	return (node as Friend).say(text, emoji) if node is Friend else 0.0
+
+
+## Чипы-эмодзи над головой персонажа ("player" или id гостя).
+func set_chips(who: String, chips: Array) -> void:
+	if who == "player" and _player != null:
+		_player.set_chips(chips)
+		return
+	var node: Variant = _objects.get(who)
+	if node is Friend:
+		(node as Friend).set_chips(chips)
+
+
+func clear_chips(who: String) -> void:
+	set_chips(who, [])
+
+
+## Убирает все надписи над головами (выход из режима NPC).
+func clear_all_head_labels() -> void:
+	if _player != null:
+		_player.head_labels().clear_all()
+	for node in _objects.values():
+		if node is Friend:
+			(node as Friend).head_labels().clear_all()
+
+
+## Видимость работы у объекта (idle): у раковины льётся вода, остальное — только поза/эмодзи над головой.
+func set_idle_work(object_id: String, on: bool) -> void:
+	if object_id == SINK_OBJECT_ID:
+		var sink: Variant = _objects.get(SINK_OBJECT_ID)
+		if sink is GarageObject:
+			(sink as GarageObject).set_washing(on)
+
+
+func has_object(object_id: String) -> bool:
+	return _objects.get(object_id) is GarageObject
+
+
+## Игрок идёт к объекту (клетка перед ним) и поворачивается к нему, например к столу смешивания.
+func walk_to_object(object_id: String) -> void:
+	var node: Variant = _objects.get(object_id)
+	if not (node is GarageObject) or _player == null:
+		return
+	var target := (node as GarageObject).front_cell()
+	if _grid.is_cell_walkable(target):
+		await _walk_to(target)
+	_player.face_toward((node as GarageObject).position.x)
+
+
+## Идентификатор диалога гостя (для автопилота: «поговорить» без нажатия E).
+func friend_dialogue_id(guest_id: String) -> String:
+	var data := _interactions.find_by_id(guest_id)
+	return data.dialogue_id if data != null else ""
+
+
+## Игрок подходит к гостю (клетка рядом с его стулом) и поворачивается к нему.
+func walk_to_friend(guest_id: String) -> void:
+	var node: Variant = _objects.get(guest_id)
+	var route: Dictionary = _guest_routes.get(guest_id, {})
+	if not (node is Friend) or route.is_empty() or _player == null:
+		return
+	var stand: Vector2i = route["stand_cell"]
+	var player_cell := Vector2i(_player.grid_position.floor())
+	# Заказ принимаем у угла стола (там же, где подаём кальян): сбоку от гостя, лицом к нему.
+	if _serve_cell.x >= 0 and _grid.is_cell_walkable(_serve_cell) and not _grid.find_path(player_cell, _serve_cell).is_empty():
+		await _walk_to(_serve_cell)
+		_player.face_toward((node as Friend).position.x)
+		return
+	# Подходим сбоку от гостя (вдоль стола), а не со спины; со спины — только если сбоку не пройти.
+	for offset in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
+		var cell: Vector2i = stand + offset
+		if _grid.is_cell_walkable(cell) and not _grid.find_path(player_cell, cell).is_empty():
+			await _walk_to(cell)
+			break
+	_player.face_toward((node as Friend).position.x)
+
+
+## Есть ли в гараже гость (идёт, сидит или ждёт).
+func has_friend() -> bool:
+	for node in _objects.values():
+		if node is Friend:
+			return true
+	return false
+
+
+## Гость встаёт со стула, идёт к двери, выходит (дверь открывается и закрывается), стул освобождается.
+## Корутина: завершается, когда гость ушёл и убран из гаража.
+func friend_leave(guest_id: String) -> void:
+	var node: Variant = _objects.get(guest_id)
+	if not (node is Friend) or _grid == null:
+		return
+	var friend := node as Friend
+	var route: Dictionary = _guest_routes.get(guest_id, {})
+	_interactions.unregister(guest_id)
+	# Приход гостя больше не должен срабатывать на этот путь.
+	for connection in friend.arrived.get_connections():
+		friend.arrived.disconnect(connection["callable"])
+	friend.set_smoking(false)
+	friend.stand_up()
+	_hose_release_if_idle()
+	var stand_cell: Vector2i = route.get("stand_cell", Vector2i(friend.grid_position.floor()))
+	var stand_rect := Rect2i(stand_cell, Vector2i.ONE)
+	_pending_blocks.erase(stand_rect)
+	_grid.set_blocked_rect(stand_rect, false)
+	var exit_position: Vector2 = route.get("entry_position", friend.grid_position)
+	var path := _grid.find_path(Vector2i(friend.grid_position.floor()), route.get("entry_cell", stand_cell))
+	path.append(exit_position)
+	# Пустой стул снова непроходим (иначе сквозь него можно ходить).
+	_pending_blocks.append(stand_rect)
+	var done := [false]
+	friend.arrived.connect(func() -> void: done[0] = true, CONNECT_ONE_SHOT)
+	friend.walk_path(path)
+	var door: Variant = _objects.get(DOOR_OBJECT_ID)
+	var door_opened := false
+	while not done[0]:
+		if door is GarageObject and not door_opened and friend.grid_position.distance_to(exit_position) < 3.0:
+			door_opened = true
+			(door as GarageObject).set_door_open(true)
+		await get_tree().process_frame
+	friend.visible = false
+	if door is GarageObject:
+		await (door as GarageObject).set_door_open(false, 0.45)
+	_player.smoke_emitter().partner = null
+	_objects.erase(guest_id)
+	_guest_routes.erase(guest_id)
+	friend.queue_free()
+	GameLog.info("garage", "Гость %s ушёл" % guest_id)
+
+
+## Кальянщик убирает кальян после ухода гостя: забирает его со стола гостя вместе со шлангом,
+## несёт к раковине, моет колбу и шланг 3–5 секунд (вода, брызги) и ставит обратно на полку.
+## Корутина: завершается, когда кальян стоит на полке. Ввод на время уборки блокируется.
+func wash_hookah_and_shelve() -> void:
+	if _player == null or _grid == null:
+		return
+	var was_locked := _input_locked
+	set_input_locked(true)
+	if _player.seated and not _sitting_busy:
+		_player.stand_up()
+	if is_object_visible(HOOKAH_OBJECT_ID):
+		await _walk_to(_serve_cell)
+		_player.face_toward(_object_base(HOOKAH_OBJECT_ID).x)
+		await get_tree().create_timer(0.25).timeout
+		hide_object(HOOKAH_OBJECT_ID)
+		_hose_holder = null
+		_hose_at_guest = false
+		_warming_up = false
+		_hose.piece = _guest_piece
+		_player.set_piece_hidden(false)
+		_hose_carried()
+		_player.set_carrying_hookah(_hookah_color)
+		_player.set_holding(true)
+		var sink: Variant = _objects.get(SINK_OBJECT_ID)
+		if sink is GarageObject:
+			await _walk_to((sink as GarageObject).front_cell())
+			_player.face_toward((sink as GarageObject).position.x)
+			# Кальян — в раковине под краном (его качает кальянщик), шланг тянется к клапану.
+			var basin := sink as GarageObject
+			_player.set_carrying(null)
+			_hose_use(func() -> Vector2: return basin.wash_valve_position(), func() -> Vector2: return _holder_end(_player),
+				func() -> Vector2: return _aim_to_mouth(_player), false, true)
+			basin.set_washing(true, _hookah_color)
+			await get_tree().create_timer(randf_range(WASH_MIN_SECONDS, WASH_MAX_SECONDS)).timeout
+			basin.set_washing(false)
+			_player.set_carrying_hookah(_hookah_color, 0)
+			_player.set_holding(true)
+			_hose_carried()
+		var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+		if shelf is GarageObject:
+			var rack := shelf as GarageObject
+			var taken := rack.taken_hookah_slots()
+			if not taken.is_empty():
+				var slot: int = taken.pick_random()
+				await _walk_to(rack.shelf_front_cell(slot))
+				await get_tree().create_timer(0.3).timeout
+				rack.put_hookah(slot, _hookah_color)
+		_player.set_carrying(null)
+	hide_object(HOOKAH_PREP_OBJECT_ID)
+	reset_hose()
+	set_input_locked(was_locked)
+
+
+## true — в коробке у стола гостя меньше min_count мундштуков.
+func mouthpieces_low(min_count: int = 2) -> bool:
+	var table: Variant = _objects.get("table_guest")
+	return table is GarageObject and (table as GarageObject).box_piece_count() < min_count
+
+
+## Кальянщик подходит вплотную к коробке с мундштуками (клетка рядом, поворот к столу гостя).
+func walk_to_mouthpiece_box() -> void:
+	var table: Variant = _objects.get("table_guest")
+	if not (table is GarageObject) or _player == null or _grid == null:
+		return
+	var box := (table as GarageObject).mouthpiece_box_grid_position()
+	if box.x < 0.0:
+		return
+	var base := Vector2i(box.floor())
+	var best := Vector2i(-1, -1)
+	var best_dist := INF
+	var here := _player.grid_position
+	for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, -1)]:
+		var cell := base + offset
+		if not _grid.is_cell_walkable(cell):
+			continue
+		var dist := Vector2(cell).distance_to(here)
+		if dist < best_dist:
+			best_dist = dist
+			best = cell
+	if best.x >= 0:
+		await _walk_to(best)
+	_player.face_toward((table as GarageObject).position.x)
+
+
+## Докладывает мундштуки в коробку у стола гостя, если их там меньше min_count. true — докладывал.
+func top_up_mouthpieces(min_count: int = 2) -> bool:
+	var table: Variant = _objects.get("table_guest")
+	return table is GarageObject and (table as GarageObject).top_up_box(min_count)
 
 
 ## Меняет подсказку/действие/позу игрока у объекта "на лету" (например, стол с кальяном:
@@ -265,7 +596,14 @@ func carry_hookah_to_guest_table() -> void:
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
+	var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
+	if prep is GarageObject:
+		_player.face_toward((prep as GarageObject).position.x)
+		# Сначала угли на чашу, затем чаша на кальян, и только потом шланг.
+		await (prep as GarageObject).play_pack_sequence()
 	await _insert_hose()
+	# Шланг вставлен: 2–3 затяжки у стола для кальянов, и только потом несём к гостю.
+	await _warm_up_puffs(2, 3)
 	hide_object(HOOKAH_PREP_OBJECT_ID)
 	_hose_carried()
 	await _walk_carrying(_serve_cell)
@@ -304,6 +642,7 @@ func _place_hookah(object_id: String) -> void:
 	# Кальянщик ставит кальян лицом к столу.
 	_player.face_toward((hookah as GarageObject).position.x)
 	(hookah as GarageObject).set_hookah_color(_hookah_color)
+	(hookah as GarageObject).set_hookah_top(0 if object_id == HOOKAH_PREP_OBJECT_ID else 2)
 	_hose.color = _hookah_color
 	_hose.handle_style = _handle_style
 	if object_id == HOOKAH_PREP_OBJECT_ID:
@@ -354,6 +693,7 @@ func _update_hose(delta: float) -> void:
 		_hose.cover_color = _hookah_color
 		var cover_node: Variant = _objects.get(_hose_cover_id)
 		_hose.cover_squash = (cover_node as GarageObject).hookah_squash() if cover_node is GarageObject else 0.0
+		_hose.cover_top = (cover_node as GarageObject).hookah_top() if cover_node is GarageObject else 0
 	if _hose_aim_fn.is_valid():
 		var aim: Vector2 = _hose_aim_fn.call()
 		if aim != Vector2.ZERO:
@@ -480,9 +820,9 @@ func _guest_takes_mouthpiece() -> void:
 		_hose.piece = _guest_piece
 
 
-## Небольшая раскурка перед подачей: 2–5 коротких тяжек.
-func _warm_up_puffs() -> void:
-	var puffs := randi_range(2, 5)
+## Раскурка кальянщиком: min_puffs–max_puffs коротких тяжек.
+func _warm_up_puffs(min_puffs: int = 2, max_puffs: int = 4) -> void:
+	var puffs := randi_range(min_puffs, max_puffs)
 	for i in puffs:
 		await _player.puff(randf_range(0.5, 1.3))
 		await get_tree().create_timer(randf_range(0.2, 0.5)).timeout
@@ -493,6 +833,9 @@ func _on_inhale(duration: float) -> void:
 	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
 	if hookah is GarageObject and (hookah as GarageObject).visible:
 		(hookah as GarageObject).squash(duration)
+	var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
+	if prep is GarageObject and (prep as GarageObject).visible and (prep as GarageObject).hookah_top() >= 1:
+		(prep as GarageObject).squash(duration)
 
 
 func _walk_to(target_cell: Vector2i) -> void:
@@ -503,8 +846,8 @@ func _walk_to(target_cell: Vector2i) -> void:
 	await _player.auto_walk_finished
 
 
-func _walk_carrying(target_cell: Vector2i) -> void:
-	_player.set_carrying_hookah(_hookah_color)
+func _walk_carrying(target_cell: Vector2i, top: int = 2) -> void:
+	_player.set_carrying_hookah(_hookah_color, top)
 	_player.set_holding(true)
 	await _walk_to(target_cell)
 	_player.set_carrying(null)

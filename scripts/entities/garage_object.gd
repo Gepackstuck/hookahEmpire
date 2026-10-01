@@ -24,6 +24,10 @@ var _glow_target: float = 0.0
 var _glow_level: float = 0.0
 var _glow_time: float = 0.0
 var _glow_center: Vector2 = Vector2(0, -24)
+var _hover_prop := -1
+var _hover_book := false
+var _prop_hits: Array = []  # [{rect: Rect2 (локально), index, texture, title}]
+var _book_hit := Rect2()
 var _props: Array = [] # предметы на поверхности (visual.props), отсортированы для правильного перекрытия
 var _footprint: Vector2i = Vector2i.ONE
 var _neon: bool = false
@@ -31,11 +35,22 @@ var _neon_time: float = 0.0
 var _anchor_grid := Vector2.ZERO
 var _hookah_color := Color("#22b8ff")
 var _hookah_squash: float = 0.0
+## Что стоит на кальяне-объекте: 0 — ничего, 1 — чаша, 2 — чаша с углями.
+var _hookah_top: int = 0
+## Чаша, которую «забивают» рядом с кальяном (анимация подготовки): видна ли, с углями ли, где (px от точки кальяна).
+var _loose_visible: bool = false
+var _loose_coals: bool = false
+var _loose_pos := Vector2.ZERO
 ## Слоты кальянов на полке: {at: Vector2 (клетки от центра), z: px, color: Color, taken: bool}.
 var _hookah_slots: Array[Dictionary] = []
 ## Мундштуки в коробочке (ячейка с нулевой прозрачностью — пустая).
 var _box_pieces: Array[Color] = []
 const BOX_PIECE_COUNT := 5
+## Раковина: идёт ли мытьё (вода и брызги).
+var _washing: bool = false
+var _wash_time: float = 0.0
+## Кальян, который моют в раковине (прозрачный цвет — никого нет).
+var _wash_color := Color(0, 0, 0, 0)
 
 
 func setup(definition: Dictionary) -> void:
@@ -65,7 +80,12 @@ func setup(definition: Dictionary) -> void:
 			_build_hookah_slots()
 		"hookah":
 			_hookah_color = Color.html(str(_visual.get("color", "#22b8ff")))
+			_hookah_top = int(_visual.get("top", 0))
 			top_y = -HookahArt.HEIGHT - 8.0
+		"wall_book":
+			top_y = -float(_visual.get("height", 118.0)) - 6.0
+		"sink":
+			top_y = -float(_visual.get("height", 30.0)) - 22.0
 		"neon_sign":
 			top_y = -110.0
 			for line in _visual.get("lines", []):
@@ -76,7 +96,7 @@ func setup(definition: Dictionary) -> void:
 	_props = _sorted_props(_visual.get("props", []))
 	for prop in _props:
 		if str(prop["type"]) == "mouthpiece_box":
-			restock_box()
+			restock_box(int(prop.get("pieces", BOX_PIECE_COUNT)))
 	if not _props.is_empty():
 		top_y -= 46.0
 	top_y -= _lift + float(_visual.get("top_extra", 0.0))
@@ -142,6 +162,10 @@ func set_highlighted(value: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if _washing:
+		_wash_time += delta
+		queue_redraw()
+		return
 	if _neon:
 		_neon_time += delta
 		queue_redraw()
@@ -165,11 +189,17 @@ func _draw() -> void:
 			_draw_door()
 		"shelf":
 			_draw_shelf()
+		"sink":
+			_draw_sink()
+		"wall_book":
+			_draw_wall_book()
 		"neon_sign":
 			_draw_neon_sign()
 		"hookah":
 			# Тень рисует сам кальян на поверхности стола (пол под столом не затеняем).
-			HookahArt.draw_hookah(self, Vector2(0, -_lift), _hookah_color, false, _hookah_squash)
+			HookahArt.draw_hookah(self, Vector2(0, -_lift), _hookah_color, false, _hookah_squash, 0, 0.0, _hookah_top)
+			if _loose_visible:
+				HookahArt.draw_bowl(self, Vector2(0, -_lift) + _loose_pos, _hookah_color, _loose_coals)
 		"emoji", "texture":
 			IsoDraw.draw_shadow(self, 18.0)
 	if _glow_level > 0.0:
@@ -299,6 +329,7 @@ func _sorted_props(raw: Variant) -> Array:
 
 
 func _draw_props(lift: Vector2) -> void:
+	_prop_hits.clear()
 	for prop in _props:
 		var at: Array = prop["at"]
 		var base := IsoProjection.grid_to_screen(Vector2(float(at[0]), float(at[1]))) + lift + Vector2(0, -float(prop.get("z", 0.0)))
@@ -318,6 +349,123 @@ func _draw_props(lift: Vector2) -> void:
 				HookahArt.draw_napkins(self, base)
 			"mouthpiece_box":
 				HookahArt.draw_mouthpiece_box(self, base, _box_pieces)
+			"mask":
+				_draw_mask(base, color)
+			"books":
+				_draw_books(base, color)
+			"image":
+				_draw_image_prop(base, prop, _props.find(prop))
+
+
+## Что под курсором (local — точка в координатах объекта): {"kind": "image", "index", "texture", "title"} / {"kind": "book"} / {}.
+func hit_test(local: Vector2) -> Dictionary:
+	if str(_visual.get("type", "")) == "wall_book":
+		return {"kind": "book"} if _book_hit.has_point(local) else {}
+	for hit: Dictionary in _prop_hits:
+		if (hit["rect"] as Rect2).has_point(local):
+			return {"kind": "image", "index": hit["index"], "texture": hit["texture"], "title": hit["title"], "description": hit.get("description", "")}
+	return {}
+
+
+func set_hover(hit: Dictionary) -> void:
+	var prop := int(hit["index"]) if str(hit.get("kind", "")) == "image" else -1
+	var book := str(hit.get("kind", "")) == "book"
+	if prop == _hover_prop and book == _hover_book:
+		return
+	_hover_prop = prop
+	_hover_book = book
+	queue_redraw()
+
+
+## Картинка-предмет (prop.texture — путь к PNG, prop.height — высота в px): стоит на поверхности, низ по центру в точке base.
+func _draw_image_prop(base: Vector2, prop: Dictionary, index: int) -> void:
+	var texture := _prop_texture(str(prop.get("texture", "")))
+	if texture == null:
+		return
+	var height := float(prop.get("height", 24.0))
+	var width := height * float(texture.get_width()) / maxf(float(texture.get_height()), 1.0)
+	_ellipse(base + Vector2(0, 0.5), width * 0.45, 2.2, Color(0, 0, 0, 0.22))
+	var rect := Rect2(base + Vector2(-width * 0.5, -height), Vector2(width, height))
+	if str(prop.get("view_texture", "")) != "":
+		_prop_hits.append({"rect": rect.grow(2.0), "index": index, "texture": str(prop["view_texture"]), "title": str(prop.get("title", "")), "description": str(prop.get("description", ""))})
+	if index == _hover_prop:
+		# Обводка при наведении: подсвеченные копии по кругу.
+		for offset: Vector2 in [Vector2(-1.6, 0), Vector2(1.6, 0), Vector2(0, -1.6), Vector2(0, 1.6), Vector2(-1.2, -1.2), Vector2(1.2, -1.2), Vector2(-1.2, 1.2), Vector2(1.2, 1.2)]:
+			draw_texture_rect(texture, Rect2(rect.position + offset, rect.size), false, Color(1.0, 0.88, 0.3))
+	draw_texture_rect(texture, rect, false)
+
+
+var _prop_textures: Dictionary = {}
+
+
+func _prop_texture(path: String) -> Texture2D:
+	if path == "":
+		return null
+	if _prop_textures.has(path):
+		return _prop_textures[path]
+	var texture: Texture2D = null
+	if ResourceLoader.exists(path):
+		texture = load(path) as Texture2D
+	else:
+		# Файл ещё не импортирован редактором — читаем PNG напрямую.
+		var image := Image.load_from_file(path) if FileAccess.file_exists(path) else null
+		if image != null:
+			texture = ImageTexture.create_from_image(image)
+	if texture == null:
+		GameLog.error("garage", "Не удалось загрузить картинку предмета '%s'" % path)
+	_prop_textures[path] = texture
+	return texture
+
+
+## Карнавальная маска на полке (оригинальный дизайн): гладкая полумаска с каймой, прорезями для глаз и перышком.
+func _draw_mask(base: Vector2, color: Color) -> void:
+	_ellipse(base + Vector2(0, 0.5), 8.0, 2.4, Color(0, 0, 0, 0.22))
+	var face := PackedVector2Array([
+		base + Vector2(-8.5, -17.0), base + Vector2(0.0, -19.0), base + Vector2(8.5, -17.0),
+		base + Vector2(9.5, -11.0), base + Vector2(6.0, -5.0), base + Vector2(2.5, -6.5),
+		base + Vector2(0.0, -4.0), base + Vector2(-2.5, -6.5), base + Vector2(-6.0, -5.0), base + Vector2(-9.5, -11.0)])
+	draw_colored_polygon(face, color.darkened(0.3))
+	draw_colored_polygon(PackedVector2Array([
+		base + Vector2(-7.4, -16.2), base + Vector2(0.0, -18.0), base + Vector2(7.4, -16.2),
+		base + Vector2(8.4, -11.2), base + Vector2(5.4, -6.3), base + Vector2(2.2, -7.6),
+		base + Vector2(0.0, -5.3), base + Vector2(-2.2, -7.6), base + Vector2(-5.4, -6.3), base + Vector2(-8.4, -11.2)]), color)
+	for side: float in [-1.0, 1.0]:
+		draw_colored_polygon(_ellipse_points(base + Vector2(4.3 * side, -11.5), 2.6, 1.5), Color("#17141c"))
+		draw_line(base + Vector2(2.0 * side, -14.2), base + Vector2(7.0 * side, -13.4), color.darkened(0.45), 1.0)
+	draw_line(base + Vector2(0.0, -12.5), base + Vector2(0.0, -8.5), color.darkened(0.3), 1.0)
+	draw_line(base + Vector2(-7.5, -16.0), base + Vector2(7.5, -16.0), color.lightened(0.35), 1.0)
+	# Перышко сбоку и ленточка.
+	draw_line(base + Vector2(8.0, -15.0), base + Vector2(13.0, -22.0), Color("#c23b3b"), 1.6, true)
+	draw_line(base + Vector2(8.0, -15.0), base + Vector2(11.0, -23.0), Color("#e8a33d"), 1.2, true)
+
+
+## Одна книга лежит на полке плашмя (выдуманный дизайн): обложка с полосой и «названием», страницы с торца.
+func _draw_books(base: Vector2, color: Color = Color("#f3d81f")) -> void:
+	var band := Color("#17151a") if color.get_luminance() > 0.5 else Color("#d8cfc0")
+	var ax := Vector2(IsoProjection.CELL_W * 0.5, IsoProjection.CELL_H * 0.5) * 0.9
+	var ay := Vector2(-IsoProjection.CELL_W * 0.5, IsoProjection.CELL_H * 0.5) * 0.6
+	var thick := Vector2(0.0, 4.5)
+	_ellipse(base + (ax + ay) * 0.5 + Vector2(0, 3.0), 17.0, 5.0, Color(0, 0, 0, 0.2))
+	var p0 := base
+	var p1 := base + ax
+	var p2 := base + ax + ay
+	var p3 := base + ay
+	# Торцы: страницы спереди (вдоль x) и сбоку.
+	draw_colored_polygon(PackedVector2Array([p3, p2, p2 + thick, p3 + thick]), Color("#efe6cf"))
+	draw_colored_polygon(PackedVector2Array([p2, p1, p1 + thick, p2 + thick]), Color("#d9cfb6"))
+	draw_line(p3 + thick, p2 + thick, Color("#9b9078"), 1.0)
+	# Обложка сверху (смещена на толщину), корешок, полоса и строчки названия.
+	var up := -Vector2(0.0, 0.5)
+	draw_colored_polygon(PackedVector2Array([p0 + up, p1 + up, p2 + up, p3 + up]), color)
+	draw_colored_polygon(PackedVector2Array([p0 + up, p0 + up + ax * 0.12, p3 + up + ax * 0.12, p3 + up]), color.darkened(0.35))
+	var s0 := p0 + up + ax * 0.2 + ay * 0.15
+	var s1 := p0 + up + ax * 0.9 + ay * 0.15
+	var s2 := p0 + up + ax * 0.9 + ay * 0.42
+	var s3 := p0 + up + ax * 0.2 + ay * 0.42
+	draw_colored_polygon(PackedVector2Array([s0, s1, s2, s3]), band)
+	for k in 3:
+		var t := 0.55 + float(k) * 0.14
+		draw_line(p0 + up + ax * 0.25 + ay * t, p0 + up + ax * (0.85 - 0.1 * float(k % 2)) + ay * t, band, 1.0)
 
 
 static func _ellipse_points(center: Vector2, rx: float, ry: float) -> PackedVector2Array:
@@ -428,9 +576,182 @@ func _chair_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Col
 		_draw_iso_box(min_c, max_c, z0, z1, color)
 
 
+## Клетка перед объектом (со стороны +y), откуда им пользуются (например, раковиной).
+func front_cell() -> Vector2i:
+	return Vector2i(floori(_anchor_grid.x), floori(_anchor_grid.y + float(_footprint.y) * 0.5))
+
+
+## Раковина: вода льётся и брызгает, пока идёт мытьё.
+func set_washing(value: bool, hookah_color: Color = Color(0, 0, 0, 0)) -> void:
+	_washing = value
+	_wash_color = hookah_color if value else Color(0, 0, 0, 0)
+	_wash_time = 0.0
+	set_process(value)
+	queue_redraw()
+
+
+func is_washing() -> bool:
+	return _washing
+
+
+## Наклон кальяна в раковине: его качают под струёй (рад).
+func _wash_tilt() -> float:
+	return 0.8 + 0.3 * sin(_wash_time * 5.5)
+
+
+## Точка опоры кальяна в раковине (в координатах родителя) — чуть левее центра чаши.
+func _wash_origin() -> Vector2:
+	var height := float(_visual.get("height", 30.0))
+	return position + Vector2(-7.0, 4.0 - height)
+
+
+## Клапан кальяна в раковине (к нему крепится шланг, пока его моют).
+func wash_valve_position() -> Vector2:
+	return _wash_origin() + (HookahArt.VALVE * HookahArt.SCALE).rotated(_wash_tilt())
+
+
+## Мойка: тумба, мойка с краном; при мытье — струя воды и брызги.
+func _draw_sink() -> void:
+	var half := Vector2(_footprint) * 0.5
+	var height := float(_visual.get("height", 30.0))
+	var base := Color.html(str(_visual.get("color", "#6b7782")))
+	var pad := 0.1
+	draw_colored_polygon(PackedVector2Array([
+		IsoProjection.grid_to_screen(Vector2(-half.x - pad, -half.y - pad)),
+		IsoProjection.grid_to_screen(Vector2(half.x + pad, -half.y - pad)),
+		IsoProjection.grid_to_screen(Vector2(half.x + pad, half.y + pad)),
+		IsoProjection.grid_to_screen(Vector2(-half.x - pad, half.y + pad))]), Color(0, 0, 0, 0.18))
+	_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, half.y), 0.0, height, base)
+	var top := Vector2(0, -height)
+	# Дверцы тумбы на передних гранях.
+	var panel := base.darkened(0.55)
+	panel.a = 0.6
+	var south_low := IsoProjection.grid_to_screen(Vector2(half.x, half.y))
+	var west_low := IsoProjection.grid_to_screen(Vector2(-half.x, half.y))
+	var east_low := IsoProjection.grid_to_screen(Vector2(half.x, -half.y))
+	draw_line(west_low.lerp(south_low, 0.5) + Vector2(0, -3), west_low.lerp(south_low, 0.5) + Vector2(0, -height + 6.0), panel, 1.2)
+	draw_line(south_low.lerp(east_low, 0.5) + Vector2(0, -3), south_low.lerp(east_low, 0.5) + Vector2(0, -height + 6.0), panel, 1.2)
+	# Чаша мойки.
+	var inset := Vector2(0.3, 0.16)
+	var n := IsoProjection.grid_to_screen(Vector2(-half.x + inset.x, -half.y + inset.y)) + top
+	var e := IsoProjection.grid_to_screen(Vector2(half.x - inset.x, -half.y + inset.y)) + top
+	var so := IsoProjection.grid_to_screen(Vector2(half.x - inset.x, half.y - inset.y)) + top
+	var w := IsoProjection.grid_to_screen(Vector2(-half.x + inset.x, half.y - inset.y)) + top
+	draw_colored_polygon(PackedVector2Array([n, e, so, w]), base.darkened(0.5))
+	var center := (n + so) * 0.5
+	var shrink := 0.7
+	draw_colored_polygon(PackedVector2Array([center.lerp(n, shrink), center.lerp(e, shrink), center.lerp(so, shrink), center.lerp(w, shrink)]), base.darkened(0.65))
+	draw_polyline(PackedVector2Array([n, e, so, w, n]), base.lightened(0.4), 1.2)
+	# Кран.
+	var tap_base := IsoProjection.grid_to_screen(Vector2(0.0, -half.y + 0.16)) + top
+	var steel := Color("#cfd8de")
+	var pipe_top := tap_base + Vector2(0, -13)
+	var spout_end := pipe_top + Vector2(-8, 4)
+	draw_line(tap_base, pipe_top, steel, 2.6)
+	draw_line(pipe_top, spout_end, steel, 2.6)
+	draw_line(pipe_top + Vector2(-4, 2), pipe_top + Vector2(4, 2), steel.darkened(0.2), 2.0)
+	if _washing:
+		var water := Color(0.65, 0.86, 1.0, 0.95)
+		var splash_at := center
+		if _wash_color.a > 0.0:
+			# Кальян в раковине: его качают под краном, струя бьёт в колбу.
+			var origin := _wash_origin() - position
+			HookahArt.draw_hookah(self, origin, _wash_color, false, 0.0, 0, _wash_tilt())
+			splash_at = origin + Vector2(0, -20).rotated(_wash_tilt())
+		draw_line(spout_end + Vector2(0, 1), splash_at + Vector2(0, -1), water, 2.2)
+		for i in 18:
+			var t := fposmod(_wash_time * 1.8 + float(i) * 0.1618, 1.0)
+			var angle := float(i) * 2.399
+			var spread := 4.0 + 18.0 * t
+			var rise := (60.0 * t - 64.0 * t * t) * (0.55 + 0.45 * absf(sin(float(i) * 1.7)))
+			var drop := splash_at + Vector2(cos(angle) * spread, sin(angle) * spread * 0.4 - rise)
+			var alpha := 1.0 - t * 0.55
+			draw_circle(drop, 1.2 + float(i % 3) * 0.45, Color(0.8, 0.93, 1.0, alpha))
+		# Пена/рябь на воде.
+		draw_arc(center, 6.0 + 2.0 * sin(_wash_time * 9.0), 0.0, TAU, 20, Color(0.8, 0.93, 1.0, 0.5), 1.0)
+
+
+## Позиция коробки с мундштуками в клетках сетки ((-1, -1), если на объекте её нет).
+func mouthpiece_box_grid_position() -> Vector2:
+	for prop in _props:
+		if str(prop["type"]) == "mouthpiece_box":
+			var at: Array = prop["at"]
+			return _anchor_grid + Vector2(float(at[0]), float(at[1]))
+	return Vector2(-1, -1)
+
+
+## Настенная книга рецептов: рама в стиле полки, раскрытая книга с закладкой, латунная лампа с тёплым светом.
+func _draw_wall_book() -> void:
+	# Книга рецептов — свиток на стене: деревянная перекладина с шариками, пергамент, нижний валик, печать, лампа.
+	var half := Vector2(_footprint) * 0.5
+	var wall_y := -half.y + 0.06
+	var wood := Color.html(str(_visual.get("color", "#6b4429")))
+	var height := float(_visual.get("height", 118.0))
+	var wall := func(u: float, z: float) -> Vector2:
+		return IsoProjection.grid_to_screen(Vector2(lerpf(-half.x + 0.12, half.x - 0.12, u), wall_y)) + Vector2(0, -z)
+	var poly := func(points: Array, color: Color) -> void:
+		var packed := PackedVector2Array()
+		for point in points:
+			packed.append(wall.call(point[0], point[1]))
+		draw_colored_polygon(packed, color)
+	var top_z := height - 24.0
+	var bottom_z := 44.0
+	var corner_a: Vector2 = wall.call(0.02, top_z + 7.0)
+	var corner_b: Vector2 = wall.call(0.98, bottom_z - 6.0)
+	_book_hit = Rect2(Vector2(minf(corner_a.x, corner_b.x), minf(corner_a.y, corner_b.y)), Vector2(absf(corner_b.x - corner_a.x), absf(corner_b.y - corner_a.y))).grow(3.0)
+	var parchment := Color("#e9dcb4")
+	# Тень от свитка и сам пергамент (чуть волнистые края).
+	poly.call([[0.14, bottom_z - 2.0], [0.88, bottom_z - 2.0], [0.88, top_z - 2.0], [0.14, top_z - 2.0]], Color(0, 0, 0, 0.18))
+	poly.call([[0.12, bottom_z], [0.5, bottom_z - 1.0], [0.88, bottom_z], [0.9, (top_z + bottom_z) * 0.5], [0.88, top_z], [0.12, top_z], [0.1, (top_z + bottom_z) * 0.5]], parchment)
+	poly.call([[0.5, bottom_z - 1.0], [0.88, bottom_z], [0.9, (top_z + bottom_z) * 0.5], [0.88, top_z], [0.5, top_z]], parchment.darkened(0.05))
+	# Строки рецептов и значок.
+	var ink := Color(0.3, 0.19, 0.1, 0.8)
+	for row in 5:
+		var z := top_z - 9.0 - float(row) * 7.0
+		var right_u := 0.82 - 0.12 * float(row % 2)
+		draw_line(wall.call(0.2, z), wall.call(right_u, z - 0.5), ink, 1.0)
+	poly.call([[0.2, top_z - 5.0], [0.3, top_z - 5.0], [0.3, top_z - 8.0], [0.2, top_z - 8.0]], Color(0.55, 0.2, 0.15, 0.85))
+	# Перекладина и нижний валик.
+	var rod_a: Vector2 = wall.call(0.04, top_z + 3.0)
+	var rod_b: Vector2 = wall.call(0.96, top_z + 3.0)
+	draw_line(rod_a, rod_b, wood.darkened(0.2), 4.0, true)
+	draw_line(rod_a + Vector2(0, -1), rod_b + Vector2(0, -1), wood.lightened(0.15), 1.5, true)
+	for knob: Vector2 in [rod_a, rod_b]:
+		draw_circle(knob, 3.4, Color("#c9a24e"))
+		draw_circle(knob + Vector2(-0.8, -0.8), 1.2, Color("#f1d98a"))
+	var roll_a: Vector2 = wall.call(0.08, bottom_z - 1.0)
+	var roll_b: Vector2 = wall.call(0.92, bottom_z - 1.0)
+	draw_line(roll_a, roll_b, parchment.darkened(0.15), 6.0, true)
+	draw_line(roll_a + Vector2(0, -1.5), roll_b + Vector2(0, -1.5), parchment.lightened(0.05), 2.0, true)
+	draw_circle(roll_a, 3.0, parchment.darkened(0.3))
+	draw_circle(roll_b, 3.0, parchment.darkened(0.3))
+	draw_circle(roll_b, 1.4, Color(0.4, 0.28, 0.15))
+	# Красная ленточка с печатью.
+	var seal: Vector2 = wall.call(0.7, bottom_z + 10.0)
+	draw_line(wall.call(0.7, bottom_z + 16.0), seal, Color("#b83232"), 2.0)
+	draw_circle(seal, 3.4, Color("#c23b3b"))
+	draw_circle(seal + Vector2(-0.8, -0.8), 1.2, Color("#e87a7a"))
+	if _hover_book:
+		var outline := PackedVector2Array([wall.call(0.02, top_z + 7.0), wall.call(0.98, top_z + 7.0), wall.call(0.98, bottom_z - 6.0), wall.call(0.02, bottom_z - 6.0), wall.call(0.02, top_z + 7.0)])
+		draw_polyline(outline, Color(1.0, 0.88, 0.3), 2.0, true)
+	# Лампа над свитком: латунный рожок и тёплый свет.
+	var lamp: Vector2 = wall.call(0.5, height - 8.0)
+	draw_colored_polygon(PackedVector2Array([lamp, wall.call(0.08, bottom_z + 6.0), wall.call(0.92, bottom_z + 6.0)]), Color(1.0, 0.82, 0.45, 0.14))
+	draw_line(wall.call(0.5, height - 13.0), lamp, Color("#b88a3a"), 2.0)
+	draw_colored_polygon(_ellipse_points(lamp + Vector2(0, -2), 6.0, 2.6), Color("#e8c46a"))
+	draw_colored_polygon(_ellipse_points(lamp + Vector2(0, -1), 3.4, 1.4), Color("#fff3c4"))
+
+
 ## Коробочка с мундштуками: заполняется случайными цветами.
-func restock_box() -> void:
+## filled — сколько ячеек заполнить (остальные пусты, выбираются случайно).
+func restock_box(filled: int = BOX_PIECE_COUNT) -> void:
 	_box_pieces = HookahArt.random_colors(BOX_PIECE_COUNT)
+	var indices: Array[int] = []
+	for i in BOX_PIECE_COUNT:
+		indices.append(i)
+	indices.shuffle()
+	for k in range(clampi(filled, 0, BOX_PIECE_COUNT), BOX_PIECE_COUNT):
+		_box_pieces[indices[k]] = Color(0, 0, 0, 0)
 	queue_redraw()
 
 
@@ -440,6 +761,19 @@ func box_piece_count() -> int:
 		if color.a > 0.0:
 			count += 1
 	return count
+
+
+## Кальянщик докладывает мундштуки: если в коробке меньше min_count, пустые ячейки
+## заполняются мундштуками случайных цветов. true — докладывал.
+func top_up_box(min_count: int = 2) -> bool:
+	if box_piece_count() >= min_count:
+		return false
+	var fresh := HookahArt.random_colors(BOX_PIECE_COUNT)
+	for i in _box_pieces.size():
+		if _box_pieces[i].a <= 0.0:
+			_box_pieces[i] = fresh[i]
+	queue_redraw()
+	return true
 
 
 ## Берёт случайный мундштук из коробочки (ячейка пустеет); пустую коробочку сначала пополняет.
@@ -461,6 +795,40 @@ func take_box_piece() -> Color:
 func set_hookah_color(color: Color) -> void:
 	_hookah_color = color
 	queue_redraw()
+
+
+## Что стоит на кальяне: 0 — ничего, 1 — чаша, 2 — чаша с углями.
+func set_hookah_top(value: int) -> void:
+	_hookah_top = value
+	queue_redraw()
+
+
+func hookah_top() -> int:
+	return _hookah_top
+
+
+## Забивка: чаша лежит рядом, в неё кладут угли, затем чашу ставят на кальян.
+## Корутина: завершается, когда на кальяне стоит чаша с углями.
+func play_pack_sequence() -> void:
+	_hookah_top = 0
+	_loose_visible = true
+	_loose_coals = false
+	_loose_pos = Vector2(24.0, 2.0)
+	queue_redraw()
+	await get_tree().create_timer(0.7).timeout
+	_loose_coals = true
+	queue_redraw()
+	await get_tree().create_timer(0.9).timeout
+	var target := Vector2(0.0, -58.0 * HookahArt.SCALE)
+	var tween := create_tween()
+	tween.tween_method(func(t: float) -> void:
+		_loose_pos = Vector2(24.0, 2.0).lerp(target, t) + Vector2(0.0, -10.0 * sin(t * PI))
+		queue_redraw(), 0.0, 1.0, 0.6).set_trans(Tween.TRANS_SINE)
+	await tween.finished
+	_loose_visible = false
+	_hookah_top = 2
+	queue_redraw()
+	await get_tree().create_timer(0.3).timeout
 
 
 ## Точка на столе под колбой (в координатах родителя) и точка клапана, куда подключается шланг.
@@ -489,8 +857,14 @@ func _build_hookah_slots() -> void:
 	var span := float(config.get("span", 4.0))
 	var rows: Array = config.get("rows", [])
 	var palette: Array = config.get("palette", [])
+	# Фиксированные цвета (colors) — всегда одни и те же; иначе случайные из палитры.
+	var fixed: Array[Color] = []
+	for entry in config.get("colors", []):
+		fixed.append(Color.html(str(entry)))
+	if not fixed.is_empty():
+		count = fixed.size()
 	for row in rows:
-		var colors := HookahArt.random_colors(count, palette)
+		var colors: Array[Color] = fixed if not fixed.is_empty() else HookahArt.random_colors(count, palette)
 		for i in count:
 			var t := 0.5 if count == 1 else float(i) / float(count - 1)
 			_hookah_slots.append({"at": Vector2(-span * 0.5 + span * t, 0.0), "z": float(row["z"]), "color": colors[i], "taken": false})
@@ -527,6 +901,22 @@ func shelf_front_cell(index: int) -> Vector2i:
 
 func is_hookah_slot_taken(index: int) -> bool:
 	return bool(_hookah_slots[index]["taken"])
+
+
+## Индексы слотов, откуда кальян сейчас снят (туда его можно вернуть).
+func taken_hookah_slots() -> Array[int]:
+	var result: Array[int] = []
+	for i in _hookah_slots.size():
+		if bool(_hookah_slots[i]["taken"]):
+			result.append(i)
+	return result
+
+
+## Кальян возвращён на полку в слот index (цвет — тот, который с неё брали).
+func put_hookah(index: int, color: Color) -> void:
+	_hookah_slots[index]["taken"] = false
+	_hookah_slots[index]["color"] = color
+	queue_redraw()
 
 
 ## Кальян снят с полки: слот пустеет.

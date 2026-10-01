@@ -187,10 +187,24 @@ func _show_detail(recipe: Dictionary) -> void:
 		_execution_text(float(recipe.get("best_execution", RecipeSystem.NO_EXECUTION))),
 		_execution_text(float(recipe.get("last_execution", RecipeSystem.NO_EXECUTION))),
 		int(recipe["times_used"])]
+	_stats.text += "\nУ гостей: лучший %s, последний %s" % [
+		_session_text(float(recipe.get("best_final", RecipeSystem.NO_EXECUTION)), ""),
+		_session_text(float(recipe.get("last_final", RecipeSystem.NO_EXECUTION)), str(recipe.get("last_guest", "")))]
 	_rename_edit.text = ""
 	var secret := str(recipe["secret_id"]) != ""
 	_rename_edit.visible = not secret
 	_rename_button.visible = not secret
+
+
+func _session_text(score: float, guest_id: String) -> String:
+	if score < 0.0:
+		return "—"
+	var text := "%.1f" % score
+	if not guest_id.is_empty():
+		var guest := GuestCatalog.load_guest(guest_id)
+		if not guest.is_empty():
+			text += " (%s)" % str(guest["name"])
+	return text
 
 
 func _execution_text(score: float) -> String:

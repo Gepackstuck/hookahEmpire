@@ -11,7 +11,8 @@ signal inhale_ended
 const SPEED_CELLS_PER_SEC := 3.5
 const MAX_FRAME_DELTA := 0.05
 const SEAT_COLOR := Color("#8a5a3c")
-const BUBBLE_Y := -132.0
+const SEATED_HEAD_OFFSET := 14.0
+const BUBBLE_Y := -112.0
 
 var guest_id: String = ""
 var grid_position: Vector2 = Vector2.ZERO
@@ -29,6 +30,7 @@ var _mood_emoji: String = ""
 var _puffs_until_mood: int = 0
 ## Дошёл до своей точки (и сел, если задана поза).
 var has_arrived: bool = false
+var _head: HeadLabels
 
 
 func _ready() -> void:
@@ -39,15 +41,17 @@ func _ready() -> void:
 	_smoke.inhale_started.connect(_on_inhale_started)
 	_smoke.inhale_ended.connect(_on_inhale_ended)
 	_bubble = Label.new()
-	_bubble.size = Vector2(56, 56)
-	_bubble.position = Vector2(-28, BUBBLE_Y)
+	_bubble.size = Vector2(28, 28)
+	_bubble.position = Vector2(-14, BUBBLE_Y)
 	_bubble.pivot_offset = _bubble.size * 0.5
 	_bubble.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_bubble.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_bubble.add_theme_font_size_override("font_size", 38)
+	_bubble.add_theme_font_size_override("font_size", 19)
 	_bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bubble.visible = false
 	add_child(_bubble)
+	_head = HeadLabels.new()
+	add_child(_head)
 	_sync_smoke_position()
 
 
@@ -56,6 +60,11 @@ func setup(id: String, _emoji: String, start_position: Vector2, _sprite_faces_ri
 	name = "Friend_%s" % id
 	_walker.position = start_position
 	_sync_position()
+
+
+## Внешность гостя из data/guests (look).
+func apply_look(look: Dictionary) -> void:
+	_figure.apply_look(look)
 
 
 func walk_path(path: Array[Vector2]) -> void:
@@ -69,11 +78,23 @@ func sit(_emoji: String, face_left: bool, _lift: float = 0.0) -> void:
 	_figure.moving = false
 	_figure.pose = CharacterFigure.POSE_SIT
 	_figure.set_facing(not face_left)
+	_head.position.y = SEATED_HEAD_OFFSET
 	if _seat_front == null:
 		_seat_front = SeatOverlay.new()
 		_seat_front.color = SEAT_COLOR
 		add_child(_seat_front)
 		move_child(_bubble, get_child_count() - 1)
+	_sync_smoke_position()
+
+
+## Гость встаёт со стула (уходит): поза "стоит", сиденье больше не рисуется поверх ног.
+func stand_up() -> void:
+	has_arrived = false
+	_figure.pose = CharacterFigure.POSE_STAND
+	_figure.holding = false
+	_head.position.y = 0.0
+	if _seat_front != null:
+		_seat_front.visible = false
 	_sync_smoke_position()
 
 
@@ -96,12 +117,41 @@ func _sync_smoke_position() -> void:
 	_smoke.position = _figure.mouth_position()
 
 
+## Реплика над головой (режим NPC); возвращает длительность показа.
+func say(text: String, emoji: String = "") -> float:
+	return _head.say(text, -1.0, emoji)
+
+
+func clear_speech() -> void:
+	_head.clear_speech()
+
+
+func set_chips(chips: Array) -> void:
+	_head.set_chips(chips)
+
+
+func clear_chips() -> void:
+	_head.clear_chips()
+
+
+func head_labels() -> HeadLabels:
+	return _head
+
+
 func hand_position() -> Vector2:
 	return position + _figure.hand_position()
 
 
 func mouth_position() -> Vector2:
 	return position + _figure.mouth_position()
+
+
+func look_toward(screen_delta: Vector2) -> void:
+	_figure.look_toward(screen_delta)
+
+
+func look_straight() -> void:
+	_figure.view = CharacterFigure.VIEW_SIDE
 
 
 func facing_sign() -> float:
@@ -168,9 +218,9 @@ func _process(delta: float) -> void:
 func _sync_position() -> void:
 	grid_position = _walker.position
 	var new_position := IsoProjection.grid_to_screen(grid_position)
-	var dx := new_position.x - position.x
-	if absf(dx) > 0.01 and _figure != null:
-		_figure.set_facing(dx > 0.0)
+	var step := new_position - position
+	if step.length() > 0.01 and _figure != null and not has_arrived:
+		_figure.walk_toward(step)
 	position = new_position
 
 
