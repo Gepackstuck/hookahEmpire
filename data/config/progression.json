@@ -2,6 +2,6 @@
   "_comment": "M8: цель MVP. Сильный рецепт — итоговая оценка не ниже strong_score минимум под required_trends разными трендами. Когда сильных рецептов goal_recipes — запускается финальный диалог.",
   "strong_score": 75,
   "required_trends": 2,
-  "goal_recipes": 3,
+  "goal_recipes": 1,
   "ending_dialogue": "mvp_ending"
 }

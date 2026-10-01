@@ -132,17 +132,17 @@ func test_goal_needs_two_trends() -> void:
 	assert_true(goal.is_strong(recipe))
 
 
-func test_goal_counts_three_recipes() -> void:
+func test_goal_counts_strong_recipes() -> void:
 	var goal := ProgressionGoal.load_default()
-	var recipes := {}
-	for i in 3:
-		recipes["r%d" % i] = {"strong_trends": ["a", "b"]}
-	recipes["weak"] = {"strong_trends": ["a"]}
-	assert_eq(goal.strong_count(recipes), 3)
-	assert_true(goal.is_complete(recipes))
-	recipes.erase("r0")
+	assert_eq(goal.goal_recipes, 1)
+	var recipes := {"weak": {"strong_trends": ["a"]}}
+	assert_eq(goal.strong_count(recipes), 0)
 	assert_true(not goal.is_complete(recipes))
-	assert_eq(goal.progress_text(recipes), "2/3")
+	assert_eq(goal.progress_text(recipes), "0/1")
+	recipes["r0"] = {"strong_trends": ["a", "b"]}
+	assert_eq(goal.strong_count(recipes), 1)
+	assert_true(goal.is_complete(recipes))
+	assert_eq(goal.progress_text(recipes), "1/1")
 
 
 func test_mvp_ending_dialogue_valid() -> void:

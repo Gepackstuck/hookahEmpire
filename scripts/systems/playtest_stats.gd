@@ -13,6 +13,13 @@ var score_sum: float = 0.0
 var payment_sum: int = 0
 var last_session: Dictionary = {}
 var started_msec: int = 0
+## M10: бит интро -> игровые секунды первого наступления (порядок сохраняется).
+var beat_times: Dictionary = {}
+## Журнал визитов: гость, заказ (предпочтения/антипредпочтения), тренд на приход, рецепт, балл.
+var visits: Array[Dictionary] = []
+## Рецепты, ставшие сильными: {"name", "trends": Array}.
+var strong_list: Array[Dictionary] = []
+const VISIT_LOG_SHOWN := 10
 
 
 func _init() -> void:
@@ -21,6 +28,31 @@ func _init() -> void:
 
 func bump(key: String, amount: int = 1) -> void:
 	counters[key] = int(counters.get(key, 0)) + amount
+
+
+## Отмечает бит интро (только первое наступление). Возвращает true, если отметка новая.
+func mark_beat(key: String, game_seconds: float) -> bool:
+	if beat_times.has(key):
+		return false
+	beat_times[key] = game_seconds
+	return true
+
+
+static func format_time(seconds: float) -> String:
+	var total := int(seconds)
+	return "%d:%02d" % [total / 60, total % 60]
+
+
+func beat_lines() -> Array[String]:
+	var lines: Array[String] = []
+	if beat_times.is_empty():
+		lines.append("Тайминги интро: —")
+		return lines
+	var parts: PackedStringArray = []
+	for key in beat_times:
+		parts.append("%s %s" % [str(key), format_time(float(beat_times[key]))])
+	lines.append("Тайминги интро (игровое время): " + ", ".join(parts))
+	return lines
 
 
 func count(key: String) -> int:
@@ -41,6 +73,34 @@ func record_session(result: Dictionary) -> void:
 	var band := str(result.get("band_id", "?"))
 	bands[band] = int(bands.get(band, 0)) + 1
 	last_session = result.duplicate()
+	visits.append(result.duplicate(true))
+
+
+func add_strong(recipe_name: String, trends: Array) -> void:
+	strong_list.append({"name": recipe_name, "trends": trends.duplicate()})
+
+
+static func _prefs_text(prefs: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	for key in prefs:
+		parts.append("%s %.1f" % [str(key), float(prefs[key])])
+	return ", ".join(parts) if not parts.is_empty() else "—"
+
+
+## Журнал визитов и сильные рецепты (для панели статистики).
+func visit_lines() -> Array[String]:
+	var lines: Array[String] = []
+	if strong_list.is_empty():
+		lines.append("Сильные рецепты: —")
+	else:
+		for entry in strong_list:
+			lines.append("Сильный рецепт: %s (тренды: %s)" % [str(entry["name"]), ", ".join(PackedStringArray(entry["trends"]))])
+	lines.append("Визиты (последние %d):" % VISIT_LOG_SHOWN)
+	var from := maxi(visits.size() - VISIT_LOG_SHOWN, 0)
+	for i in range(from, visits.size()):
+		var v: Dictionary = visits[i]
+		lines.append("%d) %s: хочет [%s], не любит [%s]; тренд «%s»; рецепт %s, балл %.1f, оплата %d" % [i + 1, str(v.get("guest_id", "?")).trim_prefix("friend_"), _prefs_text(v.get("prefs", {})), _prefs_text(v.get("dislikes", {})), str(v.get("trend_name", "?")), str(v.get("recipe_name", v.get("recipe_id", "?"))), float(v.get("final_score", 0.0)), int(v.get("payment", 0))])
+	return lines
 
 
 func average_score() -> float:
@@ -59,6 +119,9 @@ func reset() -> void:
 	score_sum = 0.0
 	payment_sum = 0
 	last_session = {}
+	beat_times.clear()
+	visits.clear()
+	strong_list.clear()
 	started_msec = Time.get_ticks_msec()
 
 

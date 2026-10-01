@@ -1,0 +1,55 @@
+{
+  "id": "friend_ivan_intro",
+  "start": [
+    {
+      "node": "repeat",
+      "conditions": [
+        {
+          "type": "story_progress_is",
+          "value": "friend_03_intro_done"
+        }
+      ]
+    },
+    {
+      "node": "greet"
+    }
+  ],
+  "speakers": {
+    "player": {
+      "name": "Я",
+      "portrait": "🕺"
+    },
+    "ivan": {
+      "name": "Иван",
+      "portrait": "🧑‍🎤"
+    }
+  },
+  "nodes": {
+    "greet": {
+      "speaker": "ivan",
+      "text": "Привет! Мне Денис и Макс все уши прожужжали про твои кальяны. Угостишь?",
+      "next": "order"
+    },
+    "order": {
+      "speaker": "ivan",
+      "text": "Значит так: {order}",
+      "effects": [
+        {
+          "type": "set_flag",
+          "flag": "ivan_order_known",
+          "value": true
+        },
+        {
+          "type": "set_story_progress",
+          "value": "friend_03_intro_done"
+        }
+      ],
+      "end": true
+    },
+    "repeat": {
+      "speaker": "ivan",
+      "text": "Я жду свой кальян!",
+      "end": true
+    }
+  }
+}

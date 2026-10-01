@@ -2,7 +2,7 @@
   "_comment": "M8: деньги, стоимость ингредиентов, репутация. Стоимость рецепта = сумма (cost ингредиента × доля в рецепте × cost_multiplier), бесплатные ингредиенты не считаются. Деньги списываются при подаче кальяна. Банкротства нет: бесплатные ингредиенты всегда доступны.",
   "start_money": 150,
   "cost_multiplier": 25,
-  "coal_cost": 80,
+  "coal_cost": 30,
   "mouthpiece_cost": 8,
   "free_ingredients": ["apple", "lemon", "lime", "vanilla", "cola"],
   "reputation": {"min": -20, "max": 100}

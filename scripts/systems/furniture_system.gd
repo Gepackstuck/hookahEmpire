@@ -162,6 +162,34 @@ func remove(uid: String) -> bool:
 	return true
 
 
+## Подарок (например, диван Бэна): предмет попадает на склад бесплатно, помечен "gift" и не продаётся.
+func grant_gift(item_id: String) -> Dictionary:
+	if not items.has(item_id):
+		return {"ok": false, "error": "Такого предмета нет в каталоге"}
+	_state.furniture_seq += 1
+	var uid := "f%d" % int(_state.furniture_seq)
+	_state.furniture.append({"uid": uid, "item": item_id, "cell": [0, 0], "rotation": 0, "placed": false, "host": "", "gift": true})
+	changed.emit()
+	return {"ok": true, "uid": uid}
+
+
+## Первый подарочный предмет такого вида (пустой словарь — нет).
+func gift_entry(item_id: String) -> Dictionary:
+	for entry in _state.furniture:
+		if bool(entry.get("gift", false)) and str(entry["item"]) == item_id:
+			return entry
+	return {}
+
+
+## Расставлено предметов, кроме подарков.
+func placed_non_gift_count() -> int:
+	var count := 0
+	for entry in placed_entries():
+		if not bool(entry.get("gift", false)):
+			count += 1
+	return count
+
+
 ## Сколько денег вернёт продажа предмета (заметно меньше цены покупки).
 func sell_price(item_id: String) -> int:
 	if not items.has(item_id):
@@ -174,6 +202,8 @@ func sell(uid: String) -> Dictionary:
 	var entry := entry_of(uid)
 	if entry.is_empty():
 		return {"ok": false, "error": "Такой предмет не куплен"}
+	if bool(entry.get("gift", false)):
+		return {"ok": false, "error": "Это подарок — его нельзя продать"}
 	var item_id := str(entry["item"])
 	var price := sell_price(item_id)
 	last_detached = _detach_children(uid)

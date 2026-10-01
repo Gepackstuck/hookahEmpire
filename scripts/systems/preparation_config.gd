@@ -22,7 +22,7 @@ var manual_light_burn_seconds: float = 3.6
 ## Допустимое число отверстий: min даёт уровень «мало» (0), max — «много» (2).
 var manual_holes_min: int = 4
 var manual_holes_max: int = 10
-var manual_max_coals: int = 4
+var manual_max_coals: int = 3
 ## Идеальное расстояние угля от центра чаши (доля радиуса).
 var manual_coal_ring: float = 0.5
 ## Ручной режим строже быстрого: допуск (доля ok_tolerance) и множитель штрафа за отклонение.

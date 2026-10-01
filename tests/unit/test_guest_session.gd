@@ -56,7 +56,7 @@ func test_random_taste_without_avoid_still_works() -> void:
 
 func test_farewell_lines_contain_payment() -> void:
 	var rng := RandomNumberGenerator.new()
-	for guest_id in ["friend_denis", "friend_max"]:
+	for guest_id in ["friend_denis", "friend_max", "friend_ivan"]:
 		var guest := GuestCatalog.load_guest(guest_id)
 		for emotion_id in ["love", "like", "okay", "meh", "dislike"]:
 			assert_true(guest["farewell"].has(emotion_id), "%s: нет прощания для %s" % [guest_id, emotion_id])
@@ -86,7 +86,8 @@ func test_second_beat_follows_first_guest() -> void:
 	var library := DialogueLibrary.new()
 	library.load_directory("res://data/dialogues")
 	assert_true(library.has_dialogue(second["dialogue"]))
-	assert_eq(beats.find_for_progress("friend_02_done"), {}, "после Макса гостей нет")
+	assert_eq(str(beats.find_for_progress("friend_02_done")["guest"]), "friend_ivan", "после Макса приходит Иван")
+	assert_eq(beats.find_for_progress("friend_03_done"), {}, "после Ивана гостей нет")
 
 
 func test_figure_look_applies_colors() -> void:

@@ -349,7 +349,7 @@ func _draw_gesture_extras() -> void:
 		var k := _drink_k()
 		draw_set_transform(hand + Vector2(1.5, -2.0), k * 1.0, Vector2.ONE)
 		draw_colored_polygon(PackedVector2Array([Vector2(-2.6, -4.0), Vector2(2.6, -4.0), Vector2(2.0, 3.0), Vector2(-2.0, 3.0)]), Color(0.85, 0.93, 1.0, 0.8))
-		draw_colored_polygon(PackedVector2Array([Vector2(-2.4, -1.0), Vector2(2.4, -1.0), Vector2(2.0, 3.0), Vector2(-2.0, 3.0)]), Color(0.45, 0.75, 1.0, 0.9))
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.4, -1.0), Vector2(2.4, -1.0), Vector2(2.0, 3.0), Vector2(-2.0, 3.0)]), Color(0.97, 0.96, 0.92, 0.95))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 

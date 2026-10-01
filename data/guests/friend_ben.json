@@ -1,0 +1,17 @@
+{
+  "id": "friend_ben",
+  "name": "Бэн",
+  "emoji": "😎",
+  "personality": "buddy",
+  "sprite_faces": "left",
+  "look": {
+    "skin": "#f0c9a0",
+    "hair": "#2b2b2b",
+    "shirt": "#e84e5f",
+    "pants": "#3b3b4a",
+    "shoes": "#1f1f24",
+    "jacket": "#c2a24a"
+  },
+  "preferences": {},
+  "orders": []
+}

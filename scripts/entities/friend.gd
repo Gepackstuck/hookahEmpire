@@ -31,6 +31,10 @@ var _puffs_until_mood: int = 0
 ## Дошёл до своей точки (и сел, если задана поза).
 var has_arrived: bool = false
 var _head: HeadLabels
+## Телефон в руке (Бэн листает ленту): рисуется поверх фигуры.
+var _phone: Node2D
+var _phone_on := false
+var _phone_time := 0.0
 
 
 func _ready() -> void:
@@ -52,6 +56,10 @@ func _ready() -> void:
 	add_child(_bubble)
 	_head = HeadLabels.new()
 	add_child(_head)
+	_phone = Node2D.new()
+	_phone.visible = false
+	_phone.draw.connect(_draw_phone)
+	add_child(_phone)
 	_sync_smoke_position()
 
 
@@ -73,12 +81,15 @@ func walk_path(path: Array[Vector2]) -> void:
 
 
 ## Друг дошёл и сел на стул: поза "сидит", передняя часть сиденья рисуется поверх ног.
-func sit(_emoji: String, face_left: bool, _lift: float = 0.0) -> void:
+func sit(_emoji: String, face_left: bool, _lift: float = 0.0, with_seat: bool = true) -> void:
 	has_arrived = true
 	_figure.moving = false
 	_figure.pose = CharacterFigure.POSE_SIT
 	_figure.set_facing(not face_left)
 	_head.position.y = SEATED_HEAD_OFFSET
+	if not with_seat:
+		_sync_smoke_position()
+		return
 	if _seat_front == null:
 		_seat_front = SeatOverlay.new()
 		_seat_front.color = SEAT_COLOR
@@ -87,9 +98,70 @@ func sit(_emoji: String, face_left: bool, _lift: float = 0.0) -> void:
 	_sync_smoke_position()
 
 
+## Анимация «садится»: лёгкий присед, смена позы, подпрыгивание и успокоение (корутина).
+func sit_down_animated(face_left: bool, with_seat: bool = false) -> void:
+	has_arrived = true
+	_figure.moving = false
+	_figure.set_facing(not face_left)
+	var tween := create_tween()
+	tween.tween_property(_figure, "position:y", 5.0, 0.16)
+	tween.tween_callback(sit.bind("", face_left, 0.0, with_seat))
+	tween.tween_property(_figure, "position:y", -3.0, 0.12)
+	tween.tween_property(_figure, "position:y", 0.0, 0.12)
+	await tween.finished
+
+
+## Анимация «встаёт»: небольшой наклон вперёд, смена позы, выпрямление (корутина).
+func stand_up_animated() -> void:
+	var tween := create_tween()
+	tween.tween_property(_figure, "position:y", 4.0, 0.14)
+	tween.tween_callback(stand_up)
+	tween.tween_property(_figure, "position:y", -4.0, 0.12)
+	tween.tween_property(_figure, "position:y", 0.0, 0.12)
+	await tween.finished
+
+
+## Телефон в руке: рука поднята, на экране мелькают разноцветные «карточки ленты».
+func is_seated() -> bool:
+	return _figure != null and _figure.pose == CharacterFigure.POSE_SIT
+
+
+func set_phone(on: bool) -> void:
+	_phone_on = on
+	_phone_time = 0.0
+	_figure.holding = on
+	_phone.visible = on
+	_phone.queue_redraw()
+
+
+func is_phone_on() -> bool:
+	return _phone_on
+
+
+func _draw_phone() -> void:
+	var hand: Vector2 = _figure.hand_position()
+	var sign_x := facing_sign()
+	var origin := hand + Vector2(1.5 * sign_x, -7.0)
+	_phone.draw_rect(Rect2(origin + Vector2(-3.0, -5.0), Vector2(6.0, 10.0)), Color(0.08, 0.08, 0.1))
+	var palette: Array[Color] = [Color("#59c8ff"), Color("#ff6fb1"), Color("#ffd166"), Color("#8dff8d")]
+	var card := int(_phone_time * 3.0) % palette.size()
+	_phone.draw_rect(Rect2(origin + Vector2(-2.3, -4.3), Vector2(4.6, 8.6)), palette[card].darkened(0.15))
+	# «Палец» листает: полоска ползёт вверх и сбрасывается.
+	var scroll := fmod(_phone_time * 6.0, 1.0)
+	_phone.draw_rect(Rect2(origin + Vector2(-2.3, 4.3 - scroll * 8.6), Vector2(4.6, 1.2)), Color(1, 1, 1, 0.6))
+
+
+## Поставить друга в точку (клетки) без ходьбы.
+func place_at(grid_pos: Vector2) -> void:
+	_walker.position = grid_pos
+	_sync_position()
+
+
 ## Гость встаёт со стула (уходит): поза "стоит", сиденье больше не рисуется поверх ног.
 func stand_up() -> void:
 	has_arrived = false
+	if _phone_on:
+		set_phone(false)
 	_figure.pose = CharacterFigure.POSE_STAND
 	_figure.holding = false
 	_head.position.y = 0.0
@@ -206,6 +278,9 @@ func show_emotion(emoji: String, hold_seconds: float = 3.5) -> void:
 
 func _process(delta: float) -> void:
 	_sync_smoke_position()
+	if _phone_on:
+		_phone_time += delta
+		_phone.queue_redraw()
 	if not _walker.is_walking():
 		return
 	var finished := _walker.step(minf(delta, MAX_FRAME_DELTA * maxf(Engine.time_scale, 1.0)))

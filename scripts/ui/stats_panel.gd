@@ -40,6 +40,13 @@ func _ready() -> void:
 	reset_button.tooltip_text = "Обнулить счётчики за запуск"
 	reset_button.pressed.connect(func() -> void: reset_requested.emit())
 	head.add_child(reset_button)
+	var copy_button := Button.new()
+	copy_button.text = "📋"
+	copy_button.add_theme_font_size_override("font_size", 12)
+	copy_button.focus_mode = Control.FOCUS_NONE
+	copy_button.tooltip_text = "Скопировать весь текст статистики в буфер обмена"
+	copy_button.pressed.connect(func() -> void: DisplayServer.clipboard_set(_label.text))
+	head.add_child(copy_button)
 	var close_button := Button.new()
 	close_button.text = "✕"
 	close_button.add_theme_font_size_override("font_size", 12)
@@ -67,7 +74,7 @@ func _ready() -> void:
 	var test_row := HBoxContainer.new()
 	test_row.add_theme_constant_override("separation", 4)
 	box.add_child(test_row)
-	for entry: Array in [["Тренд ▶", "Переключить на следующий тренд", trend_next_requested], ["+1000 💰", "Добавить 1000 денег", money_requested], ["Сброс цели", "Сбросить прогресс «3 сильных рецепта»", goal_reset_requested], ["💰 → 0", "Обнулить деньги (проверка платных рецептов и бесплатных ингредиентов)", money_zero_requested]]:
+	for entry: Array in [["Тренд ▶", "Переключить на следующий тренд", trend_next_requested], ["+1000 💰", "Добавить 1000 денег", money_requested], ["Сброс цели", "Сбросить прогресс «сильный рецепт»", goal_reset_requested], ["💰 → 0", "Обнулить деньги (проверка платных рецептов и бесплатных ингредиентов)", money_zero_requested]]:
 		var test_button := Button.new()
 		test_button.text = str(entry[0])
 		test_button.tooltip_text = str(entry[1])
@@ -80,7 +87,14 @@ func _ready() -> void:
 	_label.add_theme_font_size_override("font_size", 13)
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_label.custom_minimum_size = Vector2(380, 0)
-	box.add_child(_label)
+	# Текст длинный: он лежит в прокручиваемой области, а панель растягивается на высоту экрана (см. Main._add_stats_panel).
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(380, 120)
+	box.add_child(scroll)
+	_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_label)
 
 
 ## Подсвечивает выбранную скорость.

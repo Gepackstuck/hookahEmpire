@@ -32,6 +32,8 @@ var stove_on: bool = false
 var coil_temp: float = 0.0
 ## Первый снятый с плитки уголь фиксирует температуру: дальше она не меняется.
 var temperature_locked: bool = false
+## Температуры уже снятых с плитки разогретых углей (по одной записи на уголь): угли можно греть партиями, по одному.
+var batch_temps: Array[float] = []
 
 
 func _init(prep_config: PreparationConfig) -> void:
@@ -53,6 +55,7 @@ func reset() -> void:
 	stove_on = false
 	coil_temp = 0.0
 	temperature_locked = false
+	batch_temps.clear()
 
 
 func reset_step(step: String) -> void:
@@ -76,6 +79,7 @@ func reset_step(step: String) -> void:
 			stove_on = false
 			coil_temp = 0.0
 			temperature_locked = false
+			batch_temps.clear()
 		"coals":
 			hot_coals += coals.size()
 			coals.clear()
@@ -168,9 +172,50 @@ func add_stove_coal(position: Vector2) -> bool:
 	return true
 
 
-## Новый (холодный) уголь можно класть на плитку только пока она выключена и угли ещё не грелись.
+## Новый (холодный) уголь можно класть на плитку, пока она выключена и угли на ней ещё не грелись.
+## Если плитка уже пуста (прошлую партию сняли в ведёрко), можно начать новую партию и греть уголь отдельно, по одному.
 func can_place_cold_coal() -> bool:
-	return not stove_on and heat_seconds <= 0.0 and total_coals() < config.manual_max_coals
+	return not stove_on and (heat_seconds <= 0.0 or stove_coals.is_empty()) and total_coals() < config.manual_max_coals
+
+
+## Холодный уголь из ведёрка кладут на пустую плитку после прошлой партии: температура начинается с нуля (прошлые запомнены).
+func begin_batch_if_needed() -> void:
+	if stove_coals.is_empty() and heat_seconds > 0.0:
+		heat_seconds = 0.0
+		temperature_locked = false
+		coil_temp = 0.0
+
+
+## Уголь попал в ведёрко горячих (его температуру запоминаем: итог розжига — среднее по всем углям).
+func note_hot_coal_collected() -> void:
+	if heat_seconds >= MIN_HEAT_SECONDS:
+		batch_temps.append(heat_seconds)
+
+
+## Вернуть горячий уголь из ведёрка на плитку можно, только пока он не разогрет.
+func can_return_hot_coal() -> bool:
+	return hot_coals > 0 and not temperature_locked and (batch_temps.is_empty() or batch_temps.back() < MIN_HEAT_SECONDS)
+
+
+func return_hot_coal_to_stove(position: Vector2) -> void:
+	if hot_coals > 0:
+		hot_coals -= 1
+	if not batch_temps.is_empty() and batch_temps.back() < MIN_HEAT_SECONDS:
+		batch_temps.pop_back()
+	stove_coals.append(position)
+
+
+## Средняя температура углей в «секундах нагрева»: снятые в ведёрко разогретые (по партиям) и лежащие на плитке.
+func average_heat() -> float:
+	var total := 0.0
+	var count := 0
+	for temp in batch_temps:
+		total += temp
+		count += 1
+	for _coal in stove_coals:
+		total += heat_seconds
+		count += 1
+	return total / float(count) if count > 0 else heat_seconds
 
 
 ## Угли с плитки можно трогать, только когда она выключена.
@@ -184,6 +229,7 @@ func collect_stove_coal(index: int) -> bool:
 		return false
 	stove_coals.remove_at(index)
 	hot_coals += 1
+	note_hot_coal_collected()
 	lock_temperature()
 	return true
 
@@ -245,7 +291,12 @@ func tick_stove(delta_seconds: float) -> void:
 
 
 func is_burnt() -> bool:
-	return heat_seconds > config.manual_light_burn_seconds
+	if heat_seconds > config.manual_light_burn_seconds:
+		return true
+	for temp in batch_temps:
+		if temp > config.manual_light_burn_seconds:
+			return true
+	return false
 
 
 # --- Перевод в уровни параметров (0..2; у углей и розжига возможны значения вне диапазона) --------
@@ -267,7 +318,7 @@ func coals_level() -> float:
 
 
 func lighting_level() -> float:
-	return clampf(heat_seconds / config.manual_light_seconds_per_level, 0.0, 3.0)
+	return clampf(average_heat() / config.manual_light_seconds_per_level, 0.0, 3.0)
 
 
 func level_of(parameter_id: String) -> float:
@@ -353,7 +404,7 @@ func extras(recipe: Dictionary, total_units: int) -> Dictionary:
 		"foil": "натяжение %d%%" % int(round(tension * 100.0)),
 		"holes": "%d шт." % holes.size(),
 		"coals": "%d шт." % coals.size(),
-		"lighting": "%.1f с%s" % [heat_seconds, " (подгорело!)" if is_burnt() else ""],
+		"lighting": "%.1f с%s" % [average_heat(), " (подгорело!)" if is_burnt() else ""],
 		"mix": "%d порц." % total_portions(),
 	}
 	return {

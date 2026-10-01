@@ -1,0 +1,47 @@
+{
+  "id": "ben_couch",
+  "start": [
+    {
+      "node": "greet"
+    }
+  ],
+  "speakers": {
+    "player": {
+      "name": "Я",
+      "portrait": "🕺"
+    },
+    "ben": {
+      "name": "Бэн",
+      "portrait": "😎"
+    }
+  },
+  "nodes": {
+    "greet": {
+      "speaker": "ben",
+      "text": "Здорово, бро! Слышал, у тебя тут настоящий бизнес начался. Горжусь!",
+      "next": "problem"
+    },
+    "problem": {
+      "speaker": "ben",
+      "text": "Только заметил: гости стоят, сидеть негде, у тебя даже диванчика нет!",
+      "next": "couch"
+    },
+    "couch": {
+      "speaker": "ben",
+      "text": "Короче, я принёс свой диван. Он у тебя в кладовке, во вкладке «В наличии» (кнопка 🛋️). Поставь его, я хочу на нём сидеть!",
+      "next": "reply"
+    },
+    "reply": {
+      "speaker": "player",
+      "text": "Спасибо, Бэн! Сейчас поставлю.",
+      "effects": [
+        {
+          "type": "set_flag",
+          "flag": "ben_couch_given",
+          "value": true
+        }
+      ],
+      "end": true
+    }
+  }
+}

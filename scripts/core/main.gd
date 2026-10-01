@@ -90,6 +90,40 @@ var _autopilot_dialogue_wait := AUTOPILOT_DIALOGUE_DELAY
 ## Над кем из гостей сейчас светятся вкусы (чипы), "" — ни над кем.
 var _wants_guest_id := ""
 
+# --- M10: интро-срез ---
+signal _notice_closed
+const BEN_ID := "friend_ben"
+const BEN_ENTRY_POSITION := Vector2(0.3, 7.5)
+const BEN_ENTRY_CELL := Vector2i(1, 7)
+const BEN_WAIT_CELL := Vector2i(9, 12)
+const NOTICE_AUTOPILOT_DELAY := 4.0
+const AUTOPILOT_AFTER_SESSIONS := 3
+## Минимальное совпадение рецепта с заказом, чтобы автопилот повторил «почти сильный» рецепт при новом тренде.
+const STRONG_HUNT_MIN_FIT := 55.0
+var _intro: IntroGuide = null
+var _buddy: Buddy = null
+var _guide_panel: PanelContainer = null
+var _guide_header: Label = null
+var _guide_label: Label = null
+var _game_seconds := 0.0
+var _strong_count := 0
+var _notice_overlay: Control = null
+var _notice_timer := 0.0
+var _furnish_next_try := 0.0
+var _modal_dim: ColorRect = null
+var _milk_button: Button = null
+var _drinking := false
+const MILK_LINES: Array[String] = [
+	"Ммм... вот это кайф!",
+	"Молочко и свобода — что ещё нужно?",
+	"Свобода пахнет кальяном и молоком.",
+	"Кайф... никто мне не указ!",
+	"Каждый глоток — маленькая свобода.",
+	"Эх, жизнь удалась. Кайф!",
+	"Вот ради этого я и ушёл в кальянщики. Свобода!",
+	"Холодное молоко, тёплый гараж — чистый кайф.",
+]
+
 @onready var _garage: GarageWorld = %Garage
 @onready var _toast: MessageToast = %MessageToast
 @onready var _dialogue_box: DialogueBox = %DialogueBox
@@ -149,6 +183,7 @@ func _ready() -> void:
 		_setup_image_viewer()
 		_setup_m8()
 		_setup_m9()
+		_setup_m10()
 	_effects = StoryEffects.new(_state)
 	_runner.effect_requested.connect(_effects.apply)
 	_refresh_objective()
@@ -163,7 +198,8 @@ func _ready() -> void:
 	_start_story()
 	# Автопилот по умолчанию включён (в отладочной сборке, где есть кнопка 🤖).
 	if OS.is_debug_build():
-		_set_autopilot.call_deferred(true)
+		if _autopilot_allowed():
+			_set_autopilot.call_deferred(true)
 
 
 ## Запускает бит истории, подходящий текущему прогрессу (в M2 — приход Дениса).
@@ -190,6 +226,7 @@ func _run_beat(beat: Dictionary) -> void:
 
 ## Друг пришёл: кидаем его заказ (случайный вкус; гость со случайным вкусом отличается от предыдущего).
 func _on_friend_arrived(guest_id: String) -> void:
+	_mark_beat("arrive_%s" % guest_id)
 	if _order.is_empty():
 		var guest := GuestCatalog.load_guest(guest_id)
 		if not guest.is_empty():
@@ -222,6 +259,7 @@ func _setup_image_viewer() -> void:
 
 func _on_image_requested(path: String, title: String, description: String) -> void:
 	if _viewer != null and _viewer.open(path, title, description):
+		$UI/Root.move_child(_viewer, -1)
 		_update_input_lock()
 
 
@@ -362,6 +400,18 @@ func _update_input_lock() -> void:
 	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() or (_summary != null and _summary.visible) or _runner.is_active or _autopilot)
 
 
+var _chiptune: ChipTune = null
+
+
+## Бумбокс на полке: включает/выключает короткую 8-битную мелодию (оригинальная, синтезируется кодом).
+func _toggle_boombox() -> void:
+	if _chiptune == null:
+		_chiptune = ChipTune.new()
+		add_child(_chiptune)
+	var on := _chiptune.toggle()
+	_notify("🎵 Бумбокс: играет" if on else "🎵 Бумбокс выключен")
+
+
 func _on_action_requested(action_id: String) -> void:
 	if _recipes == null:
 		_notify("Система рецептов недоступна (ошибка данных, см. лог).")
@@ -386,6 +436,8 @@ func _on_action_requested(action_id: String) -> void:
 		"open_recipe_book":
 			_book_from_mixer = false
 			_book.open()
+		"toggle_boombox":
+			_toggle_boombox()
 		"replace_coals":
 			await _replace_coals()
 		"redo_hookah":
@@ -585,7 +637,13 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 		"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]),
 		"band_id": str(verdict["band_id"]), "payment": payment, "reputation_delta": int(verdict["reputation_delta"])})
 	_apply_session_economy(verdict)
-	_stats.record_session({"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]), "band_id": str(verdict["band_id"]), "payment": payment})
+	_state.set_flag("sessions_done", _sessions_done() + 1)
+	_mark_beat("session_%d" % _sessions_done())
+	_apply_unlocks()
+	var visit_recipe := _recipes.get_recipe(str(verdict["recipe_id"]))
+	_stats.record_session({"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]), "band_id": str(verdict["band_id"]), "payment": payment,
+		"prefs": _order.get("preferences", {}), "dislikes": _order.get("dislikes", {}), "trend_name": str(verdict.get("trend_name", "")),
+		"recipe_name": _recipes.display_name(visit_recipe) if not visit_recipe.is_empty() else ""})
 	GameLog.info("session", "%s: %.1f (%s), оплата %d" % [guest_id, float(verdict["final_score"]), str(verdict["band_id"]), payment])
 	_garage.set_friend_smoking(guest_id, false)
 	await _wait_until_free()
@@ -621,6 +679,7 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	_apply_station()
 	_advance_trend()
 	await _maybe_play_ending()
+	await _maybe_ben_arrival()
 	# Новый гость приходит и садится, пока кальянщик моет кальян и убирает его на полку.
 	_start_story()
 	_carrying = true
@@ -634,6 +693,34 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 
 
 # --- M7: жар, замена углей, перезабивка ------------------------------------------------------
+
+const WAIT_LINE_DELAY := 2.0
+const WAIT_LINES: Array[String] = ["Я сейчас!", "Секунду, я сейчас!", "Минутку, сейчас подойду!"]
+var _wait_timer := 0.0
+var _wait_guest_id := ""
+
+
+## Гость пришёл и ждёт заказа, а кальянщик занят: один раз за приход говорим «я сейчас».
+func _tick_wait_line(delta: float) -> void:
+	var guest_id := _garage.ready_friend_id() if _garage != null else ""
+	if guest_id == "" or _order_known() or _runner.is_active or (_summary != null and _summary.visible):
+		_wait_timer = 0.0
+		if guest_id == "":
+			_wait_guest_id = ""
+		return
+	if _wait_guest_id == guest_id:
+		return
+	var busy := _servicing or _carrying or _mixer.visible or _book.visible or _preparation_screen.visible \
+		or (_manual_screen != null and _manual_screen.visible) or _autopilot_running
+	if not busy:
+		_wait_timer = 0.0
+		return
+	_wait_timer += delta
+	if _wait_timer >= WAIT_LINE_DELAY:
+		_wait_guest_id = guest_id
+		_wait_timer = 0.0
+		_garage.say("player", WAIT_LINES[_rng.randi_range(0, WAIT_LINES.size() - 1)])
+
 
 func _ui_paused() -> bool:
 	return _runner.is_active or _mixer.visible or _book.visible or _preparation_screen.visible \
@@ -703,6 +790,10 @@ func _tick_session(delta: float) -> void:
 func _on_heat_state_changed(new_state: String) -> void:
 	_sync_heat_visual()
 	_apply_station()
+	_refresh_guide()
+	# Жар на пределе (от 95): гость перестаёт курить, пока не сменят угли.
+	if new_state == HeatModel.STATE_BURNED and _session_guest_id != "":
+		_garage.set_friend_smoking(_session_guest_id, false)
 	if new_state != HeatModel.STATE_NORMAL:
 		_stats.bump("heat_" + new_state)
 		_complain()
@@ -748,6 +839,9 @@ func _replace_coals() -> void:
 	_servicing = true
 	_carrying = true
 	_stats.bump("coal_service")
+	_state.set_flag("coals_replaced_once", true)
+	_mark_beat("coals_replaced")
+	_refresh_guide()
 	if _autopilot:
 		_stats.bump("coal_service_npc")
 	_update_input_lock()
@@ -763,6 +857,8 @@ func _replace_coals() -> void:
 			_notify("Новые угли: −%d 💰" % coal_paid)
 	if _heat_active:
 		_heat.service()
+		if _session_guest_id != "" and _station.guest_smokes():
+			_garage.set_friend_smoking(_session_guest_id, true, "")
 		_npc_service_pending = false
 		_complaint_timer = _heat.complaint_cooldown
 		_sync_heat_visual()
@@ -881,6 +977,7 @@ func _order_known() -> bool:
 
 
 func _refresh_objective() -> void:
+	_refresh_guide()
 	if _objective_label == null or _state == null:
 		return
 	if _autopilot:
@@ -927,6 +1024,11 @@ func _add_objective_label() -> void:
 # --- Автопилот ---------------------------------------------------------------------------------
 
 func _set_autopilot(on: bool) -> void:
+	if on and not _autopilot_allowed():
+		if _autopilot_button != null:
+			_autopilot_button.set_pressed_no_signal(false)
+		_notify("🔒 Автопилот откроется после третьего гостя: двух обслужи вручную, третьего — в быстром режиме.")
+		return
 	_autopilot = on
 	if _autopilot_button != null:
 		_autopilot_button.set_pressed_no_signal(on)
@@ -1018,10 +1120,10 @@ const IDLE_ACTIONS := {
 	"shelf_hookah": {"look_mask": ["🎭", "🧐"], "look_book": ["📕", "🧐"], "swap": ["🔄", "🧐"], "juggle": ["🤹", "✨", "🌿"]},
 	"recipe_book": {"think": ["🤔", "💭"], "read": ["📖", "🧐"]},
 	"sign_neon": {"look": ["💡", "🤨"], "pat": ["🔧", "👋", "🤨"]},
-	"table_hookah": {"stand": ["🔥", "🧰", "💨"], "drink": ["💧", "🥤", "😌"], "juggle": ["🤹", "✨", "🌿"]},
+	"table_hookah": {"stand": ["🔥", "🧰", "💨"], "drink": ["🥛", "😌", "🤍"], "juggle": ["🤹", "✨", "🌿"]},
 }
 ## Гости приходят по кругу: когда прогресс доходит до LOOP_END_PROGRESS, он сбрасывается на LOOP_RESTART_PROGRESS.
-const LOOP_END_PROGRESS := "friend_02_done"
+const LOOP_END_PROGRESS := "friend_03_done"
 const LOOP_RESTART_PROGRESS := "intro_start"
 const IDLE_MIN_SECONDS := 9.0
 const IDLE_MAX_SECONDS := 16.0
@@ -1050,6 +1152,8 @@ func _autopilot_busy() -> bool:
 ## Один «заход» простоя: идёт к случайному объекту (не к тому же, что в прошлый раз) и 3–6 с делает вид, что работает.
 ## Прерывается, как только появляется настоящее дело.
 func _autopilot_idle() -> void:
+	if _autopilot_furnish():
+		return
 	# Мундштуков в коробке мало — докладываем их прямо в простое, не дожидаясь нового заказа.
 	if _garage.mouthpieces_low(2):
 		await _autopilot_refill_mouthpieces()
@@ -1085,6 +1189,8 @@ func _autopilot_idle() -> void:
 	var elapsed := 0.0
 	var next_emoji := 0.0
 	_stats.bump("idle_" + action)
+	if action == "drink":
+		_garage.say("player", MILK_LINES.pick_random())
 	_idle_acting = true
 	_idle_act(target, action, duration)
 	while _idle_acting:
@@ -1206,7 +1312,17 @@ func _autopilot_serve() -> void:
 	for candidate_recipe in _recipes.all_recipes():
 		if _economy == null or _economy.can_afford_recipe(candidate_recipe, _recipes.config.total_units):
 			affordable.append(candidate_recipe)
-	var recipe_id := AutoCook.find_fitting_recipe(affordable, _recipes.catalog, _recipes.config, _scoring, taste, AutoCook.FIT_MIN_FOR_EXISTING)
+	var recipe_id := ""
+	# Цель «сильные рецепты»: пока она не выполнена, сначала пробуем повторить рецепт, который уже был сильным при другом тренде.
+	if _goal != null and _trends != null and not _goal.is_complete(_state.recipes):
+		var hunt: Array[Dictionary] = []
+		for candidate_recipe in affordable:
+			var strong_trends: Array = candidate_recipe.get("strong_trends", [])
+			if strong_trends.size() >= 1 and not _goal.is_strong(candidate_recipe) and not strong_trends.has(_trends.current_id):
+				hunt.append(candidate_recipe)
+		recipe_id = AutoCook.find_fitting_recipe(hunt, _recipes.catalog, _recipes.config, _scoring, taste, STRONG_HUNT_MIN_FIT)
+	if recipe_id == "":
+		recipe_id = AutoCook.find_fitting_recipe(affordable, _recipes.catalog, _recipes.config, _scoring, taste, AutoCook.FIT_MIN_FOR_EXISTING)
 	if recipe_id != "":
 		var known := _recipes.get_recipe(recipe_id)
 		_garage.say("player", "Есть подходящий рецепт: %s." % _recipes.display_name(known))
@@ -1320,8 +1436,16 @@ func _clear_wants_badge() -> void:
 
 ## Автопилот «нажимает» за игрока: листает диалоги и закрывает карточку итогов.
 func _process(delta: float) -> void:
+	_game_seconds += delta
+	if _modal_dim != null:
+		_modal_dim.visible = _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible)
+	if _notice_overlay != null and _autopilot:
+		_notice_timer += delta
+		if _notice_timer >= NOTICE_AUTOPILOT_DELAY:
+			_notice_closed.emit()
 	_tick_session(delta)
 	_tick_hud(delta)
+	_tick_wait_line(delta)
 	if not _autopilot:
 		_autopilot_dialogue_timer = 0.0
 		_autopilot_summary_timer = 0.0
@@ -1491,6 +1615,9 @@ func _add_stats_panel() -> void:
 	_stats_panel.offset_left = -420.0
 	_stats_panel.offset_right = -16.0
 	_stats_panel.offset_top = 76.0
+	_stats_panel.anchor_bottom = 1.0
+	_stats_panel.offset_bottom = -16.0
+	_stats_panel.grow_vertical = Control.GROW_DIRECTION_END
 	_stats_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 
 
@@ -1618,6 +1745,12 @@ func _apply_session_economy(verdict: Dictionary) -> void:
 		return
 	if _goal.record(recipe, str(verdict.get("trend_id", "")), float(verdict["final_score"])):
 		_stats.bump("strong_recipes")
+		var trend_names: Array = []
+		for trend_id in recipe.get("strong_trends", []):
+			trend_names.append(_trends.name_of(str(trend_id)) if _trends != null else str(trend_id))
+		_stats.add_strong(_recipes.display_name(recipe), trend_names)
+		_strong_count += 1
+		_mark_beat("strong_%d" % _strong_count)
 		_notify("⭐ Сильный рецепт! Цель: %s" % _goal.progress_text(_state.recipes))
 
 
@@ -1627,11 +1760,12 @@ func _maybe_play_ending() -> void:
 		return
 	_state.set_flag(ProgressionGoal.DONE_FLAG, true)
 	_stats.bump("goal_done")
+	_mark_beat("goal_done")
 	var dialogue := _library.get_dialogue(_goal.ending_dialogue)
 	if dialogue.is_empty():
 		GameLog.error("progression", "Нет финального диалога '%s'" % _goal.ending_dialogue)
 		return
-	_notify("🎯 Цель выполнена: 3 сильных рецепта!")
+	_notify("🎯 Цель выполнена: сильный рецепт собран!")
 	await get_tree().create_timer(1.0).timeout
 	if _runner.is_active:
 		return
@@ -1642,6 +1776,8 @@ func _maybe_play_ending() -> void:
 	else:
 		_dialogue_box.close()
 	_update_input_lock()
+	if _intro != null:
+		await _show_notice(_intro.ending_notice)
 
 
 ## M9: окно мебели (кнопка 🛋️): магазин, расстановка, перемещение и уборка предметов.
@@ -1666,6 +1802,7 @@ func _setup_m9() -> void:
 	_furniture_screen.remove_requested.connect(_on_furniture_remove)
 	_furniture_screen.drag_started.connect(_on_furniture_drag_started)
 	_furniture_screen.sell_requested.connect(_on_furniture_sell)
+	_furniture_screen.preview_requested.connect(func(path: String, title: String) -> void: _on_image_requested(path, title, ""))
 	layer.ui_blocker = _furniture_pointer_over_ui
 	layer.drag_started.connect(_on_furniture_drag_started)
 	_furniture_screen.placement_cancel_requested.connect(func() -> void: layer.cancel_placement())
@@ -1721,7 +1858,12 @@ func _toggle_furniture_screen() -> void:
 	if _furniture_screen.visible:
 		_furniture_screen.close()
 		return
+	if not _furniture_unlocked():
+		_notify("🔒 Мебель откроется после первого гостя.")
+		return
 	_furniture_screen.open()
+	if _guide_panel != null:
+		_guide_panel.visible = false
 	_garage.begin_free_camera()
 	if _furniture_button != null:
 		_furniture_button.visible = false
@@ -1741,7 +1883,9 @@ func _on_furniture_closed() -> void:
 		_furniture_menu.close()
 	_garage.end_free_camera()
 	if _furniture_button != null:
-		_furniture_button.visible = true
+		_furniture_button.visible = _furniture_unlocked()
+	if _guide_panel != null:
+		_guide_panel.visible = true
 	_set_furniture_pause(false)
 	_update_input_lock()
 
@@ -1817,6 +1961,8 @@ func _on_furniture_placed(cell: Vector2, rotation: int) -> void:
 	var result := _furniture.place(uid, cell, rotation)
 	if result["ok"]:
 		_stats.bump("furniture_placed")
+		if _furniture.placed_non_gift_count() >= 1:
+			_mark_beat("decorated")
 		layer.cancel_placement(false)
 		_furniture_screen.set_placing(false)
 		var detached := int(result.get("detached", 0))
@@ -1894,6 +2040,380 @@ func _set_game_speed(value: float) -> void:
 	GameLog.info("test", "Скорость игры ×%.0f" % scale)
 
 
+# --- M10: интро-срез (ворота, Бэн, цель в углу, концовка-уведомление) ------------------------------
+
+func _setup_m10() -> void:
+	_intro = IntroGuide.load_default()
+	for message in _intro.errors:
+		GameLog.error("intro", message)
+	_build_guide_panel()
+	if _furniture != null:
+		_furniture.changed.connect(_on_furniture_changed)
+	_build_milk_button()
+	_setup_modal_dim()
+	_apply_unlocks()
+	_restore_ben.call_deferred()
+
+
+## Затемнение под окнами смешивания, книги рецептов и забивки: HUD, цель и кнопки уходят под него и не залезают на окна.
+func _setup_modal_dim() -> void:
+	var root := $UI/Root as Control
+	_modal_dim = ColorRect.new()
+	_modal_dim.color = Color(0, 0, 0, 0.6)
+	_modal_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_modal_dim.visible = false
+	root.add_child(_modal_dim)
+	_modal_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.move_child(_modal_dim, _mixer.get_index())
+	for node in [_hud, _guide_panel, _objective_label, _furniture_button, _milk_button, _autopilot_button, _camera_button, _stats_button]:
+		if node != null and (node as Node).get_parent() == root:
+			root.move_child(node as Node, _modal_dim.get_index())
+
+
+## Кнопка 🥛: кальянщик вручную пьёт молоко и говорит что-нибудь про кайф и свободу.
+func _build_milk_button() -> void:
+	_milk_button = Button.new()
+	_milk_button.text = "🥛"
+	_milk_button.tooltip_text = "Выпить молока"
+	_milk_button.focus_mode = Control.FOCUS_NONE
+	_milk_button.add_theme_font_size_override("font_size", 28)
+	_milk_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_milk_button.offset_left = 84.0
+	_milk_button.offset_top = 126.0
+	_milk_button.offset_right = 140.0
+	_milk_button.offset_bottom = 178.0
+	_milk_button.pressed.connect(_drink_milk)
+	$UI/Root.add_child(_milk_button)
+
+
+func _drink_milk() -> void:
+	if _autopilot or _drinking or _carrying or _ui_paused() or _furniture_open():
+		return
+	_drinking = true
+	_carrying = true
+	_update_input_lock()
+	_stats.bump("milk_drunk")
+	_garage.set_chips("player", [{"emoji": "🥛", "state": "pick"}])
+	await _garage.play_drink(2.6, MILK_LINES.pick_random())
+	_garage.clear_chips("player")
+	_carrying = false
+	_drinking = false
+	_update_input_lock()
+
+
+func _sessions_done() -> int:
+	return int(_state.get_flag("sessions_done", 0)) if _state != null else 0
+
+
+func _mark_beat(key: String) -> void:
+	_stats.mark_beat(key, _game_seconds)
+
+
+func _autopilot_allowed() -> bool:
+	return _intro == null or _sessions_done() >= AUTOPILOT_AFTER_SESSIONS
+
+
+func _furniture_unlocked() -> bool:
+	return _intro == null or _intro.is_furniture_unlocked(_sessions_done())
+
+
+## Применяет ворота: быстрый режим и мебель открываются после нужного числа гостей.
+func _apply_unlocks() -> void:
+	if _intro == null:
+		return
+	var count := _sessions_done()
+	var quick := _intro.is_quick_unlocked(count)
+	_preparation_screen.set_quick_locked(not quick, "Быстрый режим откроется после %d-го гостя" % _intro.quick_after_sessions)
+	if quick and _state.get_flag("quick_unlock_seen", false) != true and _intro.quick_after_sessions > 0:
+		_state.set_flag("quick_unlock_seen", true)
+		_mark_beat("quick_unlocked")
+		_notify("🎚 Открыт быстрый режим приготовления!")
+	var furniture := _intro.is_furniture_unlocked(count)
+	if _furniture_button != null and not _furniture_open():
+		_furniture_button.visible = furniture
+	if furniture and _state.get_flag("furniture_unlock_seen", false) != true and _intro.furniture_after_sessions > 0:
+		_state.set_flag("furniture_unlock_seen", true)
+		_mark_beat("furniture_unlocked")
+		_notify("🛋️ Открыта мебель: кнопка слева вверху!")
+	if _autopilot_button != null:
+		_autopilot_button.disabled = not _autopilot_allowed()
+		_autopilot_button.tooltip_text = "Автопилот кальянщика (F10)" if _autopilot_allowed() else "Автопилот откроется после третьего гостя"
+	_refresh_guide()
+
+
+# --- Цель в углу экрана ---
+
+func _build_guide_panel() -> void:
+	_guide_panel = PanelContainer.new()
+	_guide_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_guide_panel.offset_left = -346.0
+	_guide_panel.offset_right = -16.0
+	_guide_panel.offset_top = 76.0
+	_guide_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_guide_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_guide_panel.add_theme_stylebox_override("panel", UiStyle.panel_style())
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_guide_panel.add_child(box)
+	_guide_header = Label.new()
+	_guide_header.add_theme_font_size_override("font_size", 15)
+	_guide_header.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
+	_guide_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(_guide_header)
+	_guide_label = Label.new()
+	_guide_label.add_theme_font_size_override("font_size", 16)
+	_guide_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_guide_label.custom_minimum_size = Vector2(290, 0)
+	_guide_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(_guide_label)
+	$UI/Root.add_child(_guide_panel)
+	_guide_panel.visible = false
+	# Окно статистики (F8) лежит поверх цели.
+	if _stats_panel != null and _stats_panel.get_parent() == $UI/Root:
+		$UI/Root.move_child(_guide_panel, _stats_panel.get_index())
+
+
+func _refresh_guide() -> void:
+	if _guide_label == null or _intro == null or _state == null:
+		return
+	var count := _sessions_done()
+	var couch: Dictionary = _furniture.gift_entry("couch") if _furniture != null else {}
+	var ctx := {
+		"sessions": count,
+		"ben_here": _state.get_flag("ben_here", false) == true,
+		"couch_placed": not couch.is_empty() and bool(couch.get("placed", false)),
+		"recipe_count": _state.recipes.size(),
+		"coals_replaced": _state.get_flag("coals_replaced_once", false) == true,
+		"heat_warn": _heat != null and _heat_active and (_heat.needs_service() or _npc_service_pending),
+		"furniture_unlocked": _intro.is_furniture_unlocked(count),
+		"extra_furniture_placed": _furniture.placed_non_gift_count() if _furniture != null else 0,
+		"goal_done": _state.get_flag(ProgressionGoal.DONE_FLAG, false) == true,
+		"progress_text": _goal.progress_text(_state.recipes) if _goal != null else "",
+	}
+	var step := _intro.current_step(ctx)
+	if str(step["id"]) == "done":
+		_guide_header.text = "🎯 Цель выполнена"
+	else:
+		_guide_header.text = "🎯 Цель (%d/%d)" % [int(step["done_count"]) + 1, int(step["total"])]
+	_guide_label.text = str(step["text"])
+	_guide_panel.visible = not _furniture_open()
+
+
+# --- Бэн ---
+
+func _bind_buddy() -> void:
+	if _buddy == null:
+		return
+	_buddy.sat_down.connect(func() -> void: _mark_beat("ben_sat"))
+
+
+## Бэн приходит после первого гостя, приносит диван (подарок: его нужно поставить самому).
+func _maybe_ben_arrival() -> void:
+	if _intro == null or _furniture == null or _buddy != null or _state == null:
+		return
+	if not _intro.ben_should_arrive(_sessions_done(), _state.get_flag("ben_here", false) == true):
+		return
+	var guest := GuestCatalog.load_guest(BEN_ID)
+	if guest.is_empty():
+		return
+	_state.set_flag("ben_here", true)
+	_carrying = true
+	_update_input_lock()
+	_buddy = _garage.spawn_buddy(guest, BEN_ENTRY_POSITION, BEN_ENTRY_CELL, BEN_WAIT_CELL, _intro)
+	if _buddy == null:
+		_carrying = false
+		_update_input_lock()
+		return
+	_bind_buddy()
+	_mark_beat("ben_arrives")
+	await _buddy.friend.arrived
+	await get_tree().create_timer(0.6).timeout
+	await _play_dialogue("ben_couch")
+	_ensure_ben_gift()
+	_notify("🎁 Бэн подарил диван! Открой 🛋️ → «В наличии» и поставь его.")
+	_buddy.start()
+	_sync_buddy_couch()
+	_carrying = false
+	_update_input_lock()
+	_refresh_objective()
+
+
+func _ensure_ben_gift() -> void:
+	if _furniture != null and _furniture.gift_entry("couch").is_empty():
+		_furniture.grant_gift("couch")
+
+
+## Бэн уже приходил (загрузка): возвращаем его в гараж без двери.
+func _restore_ben() -> void:
+	if _intro == null or _furniture == null or _buddy != null or _state == null:
+		return
+	if _state.get_flag("ben_here", false) != true:
+		return
+	var guest := GuestCatalog.load_guest(BEN_ID)
+	if guest.is_empty():
+		return
+	_ensure_ben_gift()
+	_buddy = _garage.spawn_buddy(guest, BEN_ENTRY_POSITION, BEN_ENTRY_CELL, BEN_WAIT_CELL, _intro, false)
+	if _buddy == null:
+		return
+	_bind_buddy()
+	await _buddy.friend.arrived
+	_sync_buddy_couch()
+	_buddy.sit_immediately()
+	_buddy.start()
+
+
+func _on_furniture_changed() -> void:
+	_sync_buddy_couch()
+	_refresh_guide()
+
+
+## Диван Бэна поставили/передвинули/убрали: Бэн это замечает.
+func _sync_buddy_couch() -> void:
+	if _furniture == null or _state == null:
+		return
+	var entry := _furniture.gift_entry("couch")
+	var placed := not entry.is_empty() and bool(entry.get("placed", false))
+	if _buddy != null:
+		if placed:
+			var rect := _furniture.entry_rect(entry)
+			_buddy.set_couch(rect, rect.size.x >= rect.size.y)
+		else:
+			_buddy.clear_couch()
+	if placed and _state.get_flag("couch_placed_once", false) != true:
+		_state.set_flag("couch_placed_once", true)
+		_mark_beat("couch_placed")
+		if _buddy != null and is_instance_valid(_buddy.friend):
+			_buddy.friend.say("Диван! Ты лучший, бро! 🛋️")
+
+
+func _play_dialogue(dialogue_id: String) -> void:
+	var dialogue := _library.get_dialogue(dialogue_id)
+	if dialogue.is_empty():
+		GameLog.error("story", "Нет диалога '%s'" % dialogue_id)
+		return
+	_update_input_lock()
+	_open_dialogue_ui(dialogue["speakers"])
+	if _runner.start(dialogue, _effects.check):
+		await _runner.finished
+	else:
+		_dialogue_box.close()
+	_update_input_lock()
+
+
+# --- Уведомление (открытая концовка) ---
+
+func _show_notice(text: String) -> void:
+	if text.is_empty():
+		return
+	_carrying = true
+	_update_input_lock()
+	var overlay := Control.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.55)
+	overlay.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiStyle.panel_style())
+	center.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	panel.add_child(box)
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 24)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size = Vector2(520, 0)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(label)
+	var button := Button.new()
+	button.text = "Продолжить"
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_size_override("font_size", 20)
+	button.custom_minimum_size = Vector2(200, 48)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.pressed.connect(func() -> void: _notice_closed.emit())
+	box.add_child(button)
+	$UI/Root.add_child(overlay)
+	_notice_overlay = overlay
+	_notice_timer = 0.0
+	await _notice_closed
+	overlay.queue_free()
+	_notice_overlay = null
+	_carrying = false
+	_update_input_lock()
+
+
+# --- Автопилот: расстановка мебели ---
+
+## Автопилот ставит подаренный диван и один-два купленных предмета. true — что-то сделал.
+func _autopilot_furnish() -> bool:
+	if _furniture == null or _intro == null or _economy == null or _furniture_open() or not _furniture_unlocked():
+		return false
+	if _game_seconds < _furnish_next_try:
+		return false
+	var uid := ""
+	for entry in _furniture.stored_entries():
+		if bool(entry.get("gift", false)):
+			uid = str(entry["uid"])
+			break
+	if uid == "" and not _furniture.stored_entries().is_empty():
+		uid = str(_furniture.stored_entries()[0]["uid"])
+	if uid == "" and _furniture.placed_non_gift_count() < 2:
+		var best := ""
+		var best_price := 1 << 30
+		for item_id in _furniture.items:
+			var price := int(_furniture.items[item_id]["price"])
+			if price < best_price:
+				best_price = price
+				best = str(item_id)
+		if best != "" and _economy.balance() >= best_price + 150:
+			var bought := _furniture.buy(best)
+			if bought["ok"]:
+				_stats.bump("furniture_bought")
+				_stats.bump("furniture_spent", best_price)
+				_notify("🛒 Куплено: %s (−%d 💰)" % [str(_furniture.item(best)["name"]), best_price])
+				uid = str(bought["uid"])
+	if uid == "":
+		return false
+	if _autopilot_place(uid):
+		_stats.bump("furniture_placed")
+		if _furniture.placed_non_gift_count() >= 1:
+			_mark_beat("decorated")
+		return true
+	_furnish_next_try = _game_seconds + 60.0
+	return false
+
+
+func _autopilot_place(uid: String) -> bool:
+	var entry := _furniture.entry_of(uid)
+	if entry.is_empty():
+		return false
+	var item_id := str(entry["item"])
+	var layer := _garage.furniture_layer()
+	var cells: Array[Vector2i] = []
+	for x in range(_furniture.room_size.x):
+		for y in range(_furniture.room_size.y):
+			cells.append(Vector2i(x, y))
+	cells.shuffle()
+	for rotation in [0, 1]:
+		for cell in cells:
+			var at := Vector2(cell)
+			if _furniture.check_placement(item_id, at, rotation, uid) != "":
+				continue
+			if layer != null and layer.validator.is_valid() and str(layer.validator.call(item_id, at, rotation, uid)) != "":
+				continue
+			if bool(_furniture.place(uid, at, rotation)["ok"]):
+				return true
+	return false
+
+
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 
@@ -1932,6 +2452,8 @@ func _stats_lines() -> Array[String]:
 	lines.append("")
 	lines.append("— ЗА ЗАПУСК —")
 	lines.append_array(_stats.summary_lines())
+	lines.append_array(_stats.visit_lines())
+	lines.append_array(_stats.beat_lines())
 	return lines
 
 

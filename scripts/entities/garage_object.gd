@@ -391,15 +391,22 @@ func _draw_props(lift: Vector2) -> void:
 				_draw_books(base, color)
 			"image":
 				_draw_image_prop(base, prop, _props.find(prop))
+			"boombox":
+				_draw_boombox(base, _props.find(prop))
 
 
 ## Что под курсором (local — точка в координатах объекта): {"kind": "image", "index", "texture", "title"} / {"kind": "book"} / {}.
 func hit_test(local: Vector2) -> Dictionary:
 	if str(_visual.get("type", "")) == "wall_book":
 		return {"kind": "book"} if _book_hit.has_point(local) else {}
+	if str(_visual.get("type", "")) == "wall_picture" and _visual.has("texture"):
+		var frame := PackedVector2Array([_wall_point(0.05, 44.0), _wall_point(0.95, 44.0), _wall_point(0.95, 96.0), _wall_point(0.05, 96.0)])
+		if Geometry2D.is_point_in_polygon(local, frame):
+			return {"kind": "image", "index": -1, "texture": str(_visual["texture"]), "title": str(_visual.get("title", "")), "description": ""}
+		return {}
 	for hit: Dictionary in _prop_hits:
 		if (hit["rect"] as Rect2).has_point(local):
-			return {"kind": "image", "index": hit["index"], "texture": hit["texture"], "title": hit["title"], "description": hit.get("description", "")}
+			return {"kind": str(hit.get("kind", "image")), "index": hit["index"], "texture": hit["texture"], "title": hit["title"], "description": hit.get("description", "")}
 	return {}
 
 
@@ -427,7 +434,7 @@ func set_prop_hidden(index: int, hidden: bool) -> void:
 
 
 func set_hover(hit: Dictionary) -> void:
-	var prop := int(hit["index"]) if str(hit.get("kind", "")) == "image" else -1
+	var prop := int(hit["index"]) if str(hit.get("kind", "")) in ["image", "boombox"] else -1
 	var book := str(hit.get("kind", "")) == "book"
 	if prop == _hover_prop and book == _hover_book:
 		return
@@ -554,6 +561,38 @@ func _draw_cup(p: Vector2, color: Color) -> void:
 	_ellipse(p + Vector2(0, -12), 5.0, 1.8, Color(1, 1, 1, 0.6))
 
 
+## Бумбокс на полке (в стилистике игры: тёмный корпус, неоновые акценты). Клик — включить/выключить музыку.
+func _draw_boombox(p: Vector2, index: int) -> void:
+	var hover := index == _hover_prop
+	var body := Color("#3a3f4f").lightened(0.12 if hover else 0.0)
+	var neon := Color("#35e0ff")
+	var pink := Color("#ff3fa4")
+	_ellipse(p + Vector2(0, 1), 21.0, 3.0, Color(0, 0, 0, 0.25))
+	# Ручка и антенна.
+	draw_polyline(PackedVector2Array([p + Vector2(-11, -16), p + Vector2(-9, -21), p + Vector2(9, -21), p + Vector2(11, -16)]), Color("#1d2029"), 2.0)
+	draw_line(p + Vector2(14, -16), p + Vector2(20, -27), Color("#9aa3b5"), 1.2)
+	# Корпус.
+	var rect := Rect2(p + Vector2(-17, -16), Vector2(34, 16))
+	draw_rect(rect, body)
+	draw_rect(rect, Color("#1d2029"), false, 1.5)
+	draw_rect(Rect2(rect.position + Vector2(1, 1), Vector2(32, 2)), body.lightened(0.18))
+	# Динамики.
+	for dx in [-9.5, 9.5]:
+		var c: Vector2 = p + Vector2(dx, -8)
+		draw_circle(c, 5.6, Color("#15171e"))
+		draw_circle(c, 4.0, Color("#272b38"))
+		draw_circle(c, 1.7, neon if dx < 0 else pink)
+	# Окошко кассеты и кнопки.
+	draw_rect(Rect2(p + Vector2(-4.5, -13), Vector2(9, 5)), Color("#0d1a22"))
+	draw_circle(p + Vector2(-2, -10.5), 1.1, neon)
+	draw_circle(p + Vector2(2, -10.5), 1.1, neon)
+	for k in 3:
+		draw_rect(Rect2(p + Vector2(-4.5 + k * 3.4, -5.5), Vector2(2.4, 2)), pink if k == 0 else Color("#9aa3b5"))
+	if hover:
+		draw_rect(rect.grow(1.5), Color(1, 1, 1, 0.5), false, 1.0)
+	_prop_hits.append({"rect": rect.grow(3.0), "index": index, "kind": "boombox", "texture": "", "title": str((_props[index] as Dictionary).get("title", "Бумбокс"))})
+
+
 func _draw_coals(p: Vector2) -> void:
 	_ellipse(p + Vector2(0, 1), 12.0, 5.0, Color(0, 0, 0, 0.25))
 	_ellipse(p + Vector2(0, -2), 11.0, 4.6, Color("#4a4f58"))
@@ -655,12 +694,13 @@ func _draw_couch() -> void:
 	# Основание на всю площадь дивана.
 	_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, half.y), 6.0, 14.0, color.darkened(0.25))
 	if along_x:
-		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, -half.y + depth), 14.0, 46.0, color.darkened(0.1))
+		# Спинка — между подлокотниками (иначе её торец выпирает за подлокотник и кажется съехавшей).
+		_draw_iso_box(Vector2(-half.x + arm, -half.y), Vector2(half.x - arm, -half.y + depth), 14.0, 46.0, color.darkened(0.1))
 		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(-half.x + arm, half.y), 14.0, 30.0, color.darkened(0.05))
 		_draw_iso_box(Vector2(-half.x + arm, -half.y + depth), Vector2(half.x - arm, half.y), 14.0, 22.0, color.lightened(0.08))
 		_draw_iso_box(Vector2(half.x - arm, -half.y), Vector2(half.x, half.y), 14.0, 30.0, color)
 	else:
-		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(-half.x + depth, half.y), 14.0, 46.0, color.darkened(0.1))
+		_draw_iso_box(Vector2(-half.x, -half.y + arm), Vector2(-half.x + depth, half.y - arm), 14.0, 46.0, color.darkened(0.1))
 		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, -half.y + arm), 14.0, 30.0, color.darkened(0.05))
 		_draw_iso_box(Vector2(-half.x + depth, -half.y + arm), Vector2(half.x, half.y - arm), 14.0, 22.0, color.lightened(0.08))
 		_draw_iso_box(Vector2(-half.x, half.y - arm), Vector2(half.x, half.y), 14.0, 30.0, color)
@@ -736,6 +776,55 @@ func _wall_point(t: float, z: float) -> Vector2:
 	return IsoProjection.grid_to_screen(p) + Vector2(0, -z)
 
 
+static var _picture_cache: Dictionary = {}
+
+
+## Картинка для рамы: сначала как импортированный ресурс, иначе читается прямо из файла (без импорта редактором).
+static func _picture_texture(path: String) -> Texture2D:
+	if _picture_cache.has(path):
+		return _picture_cache[path]
+	var texture: Texture2D = null
+	if ResourceLoader.exists(path):
+		texture = load(path) as Texture2D
+	if texture == null:
+		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
+		if image != null:
+			texture = ImageTexture.create_from_image(image)
+	_picture_cache[path] = texture
+	return texture
+
+
+## Картина в раме: паспарту и изображение с сохранением пропорций, на плоскости стены.
+func _draw_wall_texture(path: String, inner0: float, inner1: float, frame: Color) -> void:
+	var texture := _picture_texture(path)
+	var mat := frame.darkened(0.45)
+	draw_colored_polygon(PackedVector2Array([_wall_point(0.1, inner0), _wall_point(0.9, inner0), _wall_point(0.9, inner1), _wall_point(0.1, inner1)]), mat)
+	if texture == null:
+		return
+	# Размеры поля в пикселях вдоль стены: клетка вдоль стены ≈ 35.8 px, высота — как есть.
+	var field_w := 0.8 * float(maxi(_footprint.x, _footprint.y)) * 35.8 - 4.0
+	var field_h := (inner1 - inner0) - 4.0
+	var aspect := float(texture.get_width()) / maxf(float(texture.get_height()), 1.0)
+	var width := field_w
+	var height := field_w / aspect
+	if height > field_h:
+		height = field_h
+		width = field_h * aspect
+	var span_t := 0.8 * width / field_w
+	var t0 := 0.5 - span_t * 0.5
+	var t1 := 0.5 + span_t * 0.5
+	var mid := (inner0 + inner1) * 0.5
+	var z0 := mid - height * 0.5
+	var z1 := mid + height * 0.5
+	var along_x := _footprint.x >= _footprint.y
+	# Вдоль оси y левая сторона картины смотрит в обратную сторону: зеркалим по u.
+	var u0 := 0.0 if along_x else 1.0
+	var u1 := 1.0 if along_x else 0.0
+	var points := PackedVector2Array([_wall_point(t0, z0), _wall_point(t1, z0), _wall_point(t1, z1), _wall_point(t0, z1)])
+	var uvs := PackedVector2Array([Vector2(u0, 1.0), Vector2(u1, 1.0), Vector2(u1, 0.0), Vector2(u0, 0.0)])
+	draw_polygon(points, PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE, Color.WHITE]), uvs, texture)
+
+
 ## M9: картина на стене — рама и пейзаж (небо, солнце, холмы).
 func _draw_wall_picture() -> void:
 	var frame := Color.html(str(_visual.get("color", "#4a3324")))
@@ -745,6 +834,10 @@ func _draw_wall_picture() -> void:
 	draw_colored_polygon(corners, frame)
 	var inner0 := z0 + 5.0
 	var inner1 := z1 - 5.0
+	if _visual.has("texture"):
+		_draw_wall_texture(str(_visual["texture"]), inner0, inner1, frame)
+		draw_polyline(PackedVector2Array([corners[0], corners[1], corners[2], corners[3], corners[0]]), frame.lightened(0.3), 1.5)
+		return
 	draw_colored_polygon(PackedVector2Array([_wall_point(0.1, inner0), _wall_point(0.9, inner0), _wall_point(0.9, inner1), _wall_point(0.1, inner1)]), Color("#8fc3e8"))
 	var sun := (_wall_point(0.72, inner1 - 11.0))
 	draw_circle(sun, 5.0, Color("#ffd45a"))
@@ -760,6 +853,28 @@ func _chair_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Col
 		_draw_iso_box(Vector2(min_c.y, min_c.x), Vector2(max_c.y, max_c.x), z0, z1, color)
 	else:
 		_draw_iso_box(min_c, max_c, z0, z1, color)
+
+
+## Занимаемый прямоугольник в клетках (для порядка отрисовки относительно персонажей).
+## Настенные вывески и картины висят в плоскости стены: их глубина нулевая, поэтому всё, что стоит перед стеной, рисуется поверх.
+func sort_rect() -> Rect2:
+	var rect := Rect2(_anchor_grid - Vector2(_footprint) * 0.5, Vector2(_footprint))
+	var visual_type := str(_visual.get("type", ""))
+	if visual_type == "neon_sign" or visual_type == "wall_picture":
+		if _footprint.x >= _footprint.y:
+			rect.size.y = 0.0
+		else:
+			rect.size.x = 0.0
+	return rect
+
+
+func is_chair() -> bool:
+	return str(_visual.get("type", "")) == "chair"
+
+
+## Крупный объект (вывеска, полка, стол): одного «y» для порядка отрисовки мало, учитываем весь прямоугольник.
+func is_sort_large() -> bool:
+	return maxi(_footprint.x, _footprint.y) >= 2
 
 
 ## Клетка перед объектом (со стороны +y), откуда им пользуются (например, раковиной).

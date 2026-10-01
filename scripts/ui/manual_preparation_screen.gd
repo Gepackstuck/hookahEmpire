@@ -233,10 +233,10 @@ func _process(_delta: float) -> void:
 		_apply_next_state(current_step())
 
 
-## «Далее» не видна, пока игрок ничего не сделал на шаге; потом активна по условиям шага.
+## «Далее» всегда на месте, но неактивна, пока игрок ничего не сделал на шаге; потом — по условиям шага.
 func _apply_next_state(step: String) -> void:
-	_next_button.visible = _manual.has_action(step)
-	_next_button.disabled = _next_blocked(step)
+	_next_button.visible = true
+	_next_button.disabled = not _manual.has_action(step) or _next_blocked(step)
 
 
 ## Можно ли идти дальше с текущего шага.
@@ -248,7 +248,7 @@ func _next_blocked(step: String) -> bool:
 			return _manual.holes.size() < _manual.config.manual_holes_min
 		"light":
 			# Угли разожжены минимум 0.2 с и все сняты с плитки в ведёрко.
-			return _manual.heat_seconds < ManualPreparation.MIN_HEAT_SECONDS or not _manual.stove_coals.is_empty() or _manual.hot_coals + _manual.coals.size() <= 0
+			return _manual.average_heat() < ManualPreparation.MIN_HEAT_SECONDS or not _manual.stove_coals.is_empty() or _manual.hot_coals + _manual.coals.size() <= 0
 		"coals":
 			return _manual.hot_coals > 0 or _manual.coals.is_empty()
 	return false
@@ -282,15 +282,30 @@ func _instruction_for(step: String) -> String:
 
 func _hint_for(step: String) -> String:
 	var target := _manual.hint_target(step, _targets)
+	var prep := _service.config
 	match step:
-		"pack":
-			return "💡 Этому рецепту подойдёт набивка примерно %d%%." % int(round(target * 100.0))
-		"foil":
+		"pack", "foil":
+			# Цель на краю шкалы (0% / 100%): честно говорим про «совсем чуть-чуть» и «почти до упора», а не «примерно 0%».
+			var parameter_id := "packing" if step == "pack" else "foil"
+			var tolerance_share := prep.manual_tolerance(parameter_id) / 2.0
+			var name_text := "набивка" if step == "pack" else "натяжение фольги"
+			if target <= tolerance_share * 0.5:
+				return "💡 Этому рецепту нужна самая лёгкая %s: достаточно чуть-чуть (не больше ~%d%%)." % [name_text, int(round(tolerance_share * 100.0))]
+			if target >= 1.0 - tolerance_share * 0.5:
+				return "💡 Этому рецепту нужна самая плотная %s: тяни почти до упора (от ~%d%%)." % [name_text, int(round((1.0 - tolerance_share) * 100.0))]
+			if step == "pack":
+				return "💡 Этому рецепту подойдёт набивка примерно %d%%." % int(round(target * 100.0))
 			return "💡 Нужное натяжение фольги — около %d%%." % int(round(target * 100.0))
 		"holes":
 			return "💡 Нужно примерно %d отверстий." % int(round(target))
 		"light":
-			return "💡 Нужно примерно %d угля, доведи температуру до зелёной зоны (около %d°C)." % [int(round(_manual.hint_target("coals", _targets))), int(round(lerpf(25.0, 400.0, target / _manual.config.manual_light_burn_seconds)))]
+			var coal_count := int(round(_manual.hint_target("coals", _targets)))
+			var burn := _manual.config.manual_light_burn_seconds
+			var tolerance_seconds := prep.manual_tolerance("lighting") * _manual.config.manual_light_seconds_per_level
+			var coals_text := "Нужно %d %s. Угли можно греть вместе или по одному." % [coal_count, "угля" if coal_count < 5 else "углей"]
+			if target <= tolerance_seconds * 0.5:
+				return "💡 %s Рецепту хватит самого слабого розжига: чуть подогрей (до ~%d°C) и сразу снимай." % [coals_text, int(round(lerpf(25.0, 400.0, tolerance_seconds / burn)))]
+			return "💡 %s Доведи температуру до зелёной зоны (около %d°C)." % [coals_text, int(round(lerpf(25.0, 400.0, target / burn)))]
 		"coals":
 			return "💡 Угли лучше класть кольцом вокруг центра."
 	return ""
@@ -344,7 +359,7 @@ func _update_buckets() -> void:
 		_hot_bucket.count = _manual.hot_coals
 		if current_step() == "light":
 			# Пока температура не зафиксирована, уголь можно вернуть из ведёрка на плиту.
-			_hot_bucket.draggable = not _manual.temperature_locked
+			_hot_bucket.draggable = _manual.can_return_hot_coal()
 
 
 func _on_cold_received() -> void:
@@ -355,6 +370,7 @@ func _on_cold_received() -> void:
 func _on_hot_received() -> void:
 	# Уголь уже снят с плитки при начале перетаскивания; ведёрко его принимает.
 	_manual.hot_coals += 1
+	_manual.note_hot_coal_collected()
 	_on_bowl_acted("coal")
 
 

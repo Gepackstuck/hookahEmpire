@@ -37,9 +37,11 @@ var _furniture_layer: FurnitureLayer = null
 var _interactions := InteractionSystem.new()
 var _player: Player = null
 var _objects: Dictionary = {} # id -> Node2D (GarageObject или Friend)
+var _buddy: Buddy = null # M10: Бэн — друг без заказов, живёт вне _objects
 var _emoji_source_id := ""
 var _highlighted: GarageObject = null
 var _serve_cell := Vector2i(-1, -1)
+var _coal_cell := Vector2i(-1, -1)
 var _prep_cell := Vector2i(-1, -1)
 var _seat_cell := Vector2i(-1, -1)
 var _sitting_busy := false
@@ -77,6 +79,8 @@ var _guest_routes: Dictionary = {}
 
 
 func _ready() -> void:
+	# Порядок отрисовки считаем сами (см. _sort_entities): одного y мало для длинных объектов вроде полки и вывесок.
+	_entities.y_sort_enabled = false
 	var layout := GarageLayout.load_file(LAYOUT_PATH)
 	if not layout.is_valid():
 		for message in layout.errors:
@@ -88,8 +92,14 @@ func _ready() -> void:
 	_backdrop.setup(layout.size)
 	_serve_cell = layout.hookah_serve_cell
 	_prep_cell = layout.hookah_prep_cell
+	_coal_cell = layout.hookah_coal_cell
 	_seat_cell = layout.player_seat_cell
 	_build_objects(layout)
+	# Стулья гостей непроходимы и пока пустые (в раскладке они не блокируют, чтобы путь гостя и проверки мебели считали клетку свободной).
+	# При приходе гостя spawn_friend освобождает его клетку на время расчёта пути, после ухода она блокируется снова.
+	for node in _objects.values():
+		if node is GarageObject and (node as GarageObject).is_chair():
+			_grid.set_blocked_rect(Rect2i(Vector2i((node as GarageObject).sort_rect().position.floor()), Vector2i.ONE), true)
 	# Стул игрока непроходим, пока на нём не сидят (иначе сквозь него можно ходить).
 	if _seat_cell.x >= 0:
 		_grid.set_blocked_rect(Rect2i(_seat_cell, Vector2i.ONE), true)
@@ -123,12 +133,75 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _player == null:
 		return
+	_sort_entities()
 	_try_apply_pending_blocks()
 	_update_hose(delta)
 	_interactions.update_focus(_player.grid_position)
 	_update_marker(delta)
 	_update_gazes()
 	_update_pointer_hover()
+
+
+## Порядок отрисовки: сначала по y (как y-sort), затем персонажи переставляются относительно крупных объектов:
+## персонаж, стоящий ближе к камере за краем объекта (по x или по y), рисуется поверх него, а стоящий дальше — под ним.
+func _sort_entities() -> void:
+	var nodes: Array[Node2D] = []
+	for child in _entities.get_children():
+		if child is Node2D:
+			nodes.append(child as Node2D)
+	if nodes.size() < 2:
+		return
+	var order: Dictionary = {}
+	for i in nodes.size():
+		order[nodes[i]] = i
+	nodes.sort_custom(func(a: Node2D, b: Node2D) -> bool:
+		if is_equal_approx(a.position.y, b.position.y):
+			return int(order[a]) < int(order[b])
+		return a.position.y < b.position.y)
+	var larges: Array[GarageObject] = []
+	var chairs: Array[GarageObject] = []
+	var characters: Array[Node2D] = []
+	for node in nodes:
+		if node is GarageObject:
+			if (node as GarageObject).is_sort_large() and node.visible:
+				larges.append(node as GarageObject)
+			elif (node as GarageObject).is_chair() and node.visible:
+				chairs.append(node as GarageObject)
+		elif node is Player or (node is Friend and not (node as Friend).is_seated()):
+			characters.append(node)
+	for character in characters:
+		var at: Vector2 = character.get("grid_position")
+		for large in larges:
+			var rect := large.sort_rect()
+			var in_front := at.y >= rect.end.y or at.x >= rect.end.x
+			var behind := at.y <= rect.position.y or at.x <= rect.position.x
+			if in_front == behind:
+				continue
+			var ci := nodes.find(character)
+			var oi := nodes.find(large)
+			if in_front and ci < oi:
+				nodes.remove_at(ci)
+				nodes.insert(nodes.find(large) + 1, character)
+			elif behind and ci > oi:
+				nodes.remove_at(ci)
+				nodes.insert(nodes.find(large), character)
+	# Сидящий гость рисуется поверх своего стула (спинка у него за спиной), но под столом.
+	for node in nodes.duplicate():
+		if node is Friend and (node as Friend).is_seated():
+			var at: Vector2 = (node as Friend).grid_position
+			var seat: GarageObject = null
+			var best := 1.2
+			for chair in chairs:
+				var distance := chair.sort_rect().get_center().distance_to(at)
+				if distance < best:
+					best = distance
+					seat = chair
+			if seat != null and nodes.find(node) < nodes.find(seat):
+				nodes.erase(node)
+				nodes.insert(nodes.find(seat) + 1, node)
+	for i in nodes.size():
+		if nodes[i].get_index() != i:
+			_entities.move_child(nodes[i], i)
 
 
 ## Кальянщик, стоя спокойно рядом с севшим гостем, поворачивается к нему (лицом/спиной/боком); иначе — профиль.
@@ -203,6 +276,8 @@ func set_head_labels_alpha(alpha: float) -> void:
 	for node in _objects.values():
 		if node is Friend:
 			(node as Friend).head_labels().modulate.a = alpha
+	if _buddy != null and is_instance_valid(_buddy.friend):
+		_buddy.friend.head_labels().modulate.a = alpha
 
 
 func furniture_layer() -> FurnitureLayer:
@@ -232,6 +307,8 @@ func _character_bodies() -> Array[Rect2]:
 		if node is Friend:
 			var friend_pos: Vector2 = (node as Friend).grid_position
 			bodies.append(Rect2(friend_pos - Vector2(0.4, 0.4), Vector2(0.8, 0.8)))
+	if _buddy != null and is_instance_valid(_buddy.friend):
+		bodies.append(Rect2(_buddy.friend.grid_position - Vector2(0.4, 0.4), Vector2(0.8, 0.8)))
 	return bodies
 
 
@@ -281,6 +358,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			image_requested.emit(str(_hover_hit["texture"]), str(_hover_hit["title"]), str(_hover_hit.get("description", "")))
 		elif kind == "book":
 			action_requested.emit("open_recipe_book")
+		elif kind == "boombox":
+			action_requested.emit("toggle_boombox")
 		get_viewport().set_input_as_handled()
 		return
 	_handle_key_input(event)
@@ -339,6 +418,41 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	GameLog.info("garage", "%s заходит в гараж" % str(guest["name"]))
 	_enter_through_door(friend, path)
 	return true
+
+
+## M10: Бэн заходит в гараж (через дверь) и идёт к wait_cell; при through_door = false появляется сразу (загрузка игры).
+## Он не входит в _objects: не гость, у него нет заказа и разговора. Возвращает Buddy (поведение запускает вызывающий через start()).
+func spawn_buddy(guest: Dictionary, entry_position: Vector2, entry_cell: Vector2i, wait_cell: Vector2i, guide: IntroGuide, through_door: bool = true) -> Buddy:
+	if _grid == null or _player == null:
+		return null
+	if _buddy != null:
+		return _buddy
+	var friend := FRIEND_SCENE.instantiate() as Friend
+	_entities.add_child(friend)
+	friend.setup(str(guest["id"]), str(guest.get("emoji", "")), entry_position, false)
+	friend.apply_look(guest.get("look", {}))
+	var buddy := Buddy.new()
+	buddy.name = "Buddy"
+	add_child(buddy)
+	buddy.setup(friend, _grid, _player, guide)
+	for object_id in guide.ben.get("interests", {}):
+		var node: Variant = _objects.get(object_id)
+		if node is GarageObject:
+			buddy.interests[object_id] = {"cell": (node as GarageObject).front_cell(), "position": (node as GarageObject).position}
+	_buddy = buddy
+	var path := _grid.find_path(entry_cell, wait_cell) if through_door else ([] as Array[Vector2])
+	if path.is_empty():
+		friend.place_at(Vector2(wait_cell) + Vector2(0.5, 0.5))
+		friend.arrived.emit.call_deferred()
+	else:
+		path.push_front(entry_position)
+		_enter_through_door(friend, path)
+	GameLog.info("garage", "%s заходит в гараж" % str(guest.get("name", "Бэн")))
+	return buddy
+
+
+func buddy() -> Buddy:
+	return _buddy
 
 
 ## Дверь открывается, гость заходит, затем дверь закрывается. Без двери — просто идёт.
@@ -407,8 +521,10 @@ func service_coals(seconds: float) -> void:
 	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
 	if not (hookah is GarageObject) or _player == null:
 		return
-	if _serve_cell.x >= 0 and Vector2(_serve_cell).distance_to(_player.grid_position) > 1.6:
-		await _walk_to(_serve_cell)
+	# Угли меняют со стороны стола, где лежит лоток со свежими углями.
+	var work_cell := _coal_cell if _coal_cell.x >= 0 and _grid.is_cell_walkable(_coal_cell) else _serve_cell
+	if work_cell.x >= 0 and Vector2(work_cell).distance_to(_player.grid_position) > 1.2:
+		await _walk_to(work_cell)
 	_player.face_toward((hookah as GarageObject).position.x)
 	await (hookah as GarageObject).play_coal_swap(seconds)
 
@@ -464,6 +580,16 @@ func play_idle_action(target: String, action: String, seconds: float, stop: Call
 			await _idle_swap(node, seconds, stop)
 		_:
 			await _idle_wait(seconds, stop)
+	_player.clear_gesture()
+
+
+## Кальянщик пьёт молоко на месте (кнопка 🥛): жест, реплика над головой.
+func play_drink(seconds: float, line: String) -> void:
+	if _player == null:
+		return
+	_player.set_gesture("drink")
+	say("player", line)
+	await get_tree().create_timer(seconds).timeout
 	_player.clear_gesture()
 
 

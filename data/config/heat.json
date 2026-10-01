@@ -3,7 +3,7 @@
   "heat": {
     "start": 50,
     "cool_per_second": 0.25,
-    "puff_gain": 2.0,
+    "puff_gain": 1.5,
     "service_heat": 50
   },
   "thresholds": {

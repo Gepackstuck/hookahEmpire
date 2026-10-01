@@ -32,6 +32,9 @@ var _pending_result: Dictionary = {}
 var cost_info: Callable = Callable()
 var _prepare_button: Button
 var _manual_button: Button
+var _quick_locked := false
+var _affordable := true
+var _quick_hint := ""
 
 
 func _ready() -> void:
@@ -107,6 +110,10 @@ func _build() -> void:
 	_recipe_picker.custom_minimum_size = Vector2(560, 0)
 	_recipe_picker.item_selected.connect(_on_recipe_selected)
 	recipe_row.add_child(_recipe_picker)
+	var info := UiStyle.label("ⓘ", 28)
+	info.mouse_filter = Control.MOUSE_FILTER_STOP
+	info.tooltip_text = "Рецепт — то, что будет приготовлено для гостя. Здесь можно выбрать любой рецепт из книги рецептов; сверху всегда последний собранный. Состав выбранного рецепта показан ниже, а параметры забивки подбираются под него."
+	recipe_row.add_child(info)
 	_recipe_info = UiStyle.label("", 22, UiStyle.MUTED)
 	_recipe_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_form.add_child(_recipe_info)
@@ -194,9 +201,8 @@ func _refresh_recipes() -> void:
 	if not has_recipes:
 		_selected_recipe_id = ""
 		return
-	var index := _recipe_ids.find(_selected_recipe_id)
-	if index < 0:
-		index = 0
+	# Всегда показываем последнюю сборку (список отсортирован по давности).
+	var index := 0
 	_recipe_picker.select(index)
 	_select_recipe(index)
 	_sync_options()
@@ -227,9 +233,8 @@ func _select_recipe(index: int) -> void:
 			_recipe_info.text += "\nСтоимость ингредиентов: %d 💰 (спишется при подаче)" % cost
 		else:
 			_recipe_info.text += "\n⛔ Не хватает денег: нужно %d 💰. Бесплатны: яблоко, лимон, лайм, ваниль, кола." % cost
-	if _prepare_button != null:
-		_prepare_button.disabled = not affordable
-		_manual_button.disabled = not affordable
+	_affordable = affordable
+	_apply_quick_lock()
 
 
 func _sync_options() -> void:
@@ -265,8 +270,28 @@ func complete_with(result: Dictionary) -> void:
 	close()
 
 
+## M10: быстрый режим (переключатели) закрыт до нужного числа гостей; hint — подпись на кнопке.
+func set_quick_locked(locked: bool, hint: String = "") -> void:
+	_quick_locked = locked
+	_quick_hint = hint
+	_apply_quick_lock()
+
+
+func _apply_quick_lock() -> void:
+	if _prepare_button == null:
+		return
+	_prepare_button.disabled = not _affordable or _quick_locked
+	_prepare_button.text = ("🔒 %s" % _quick_hint) if _quick_locked and _quick_hint != "" else "🎚 Приготовить переключателями"
+	_manual_button.disabled = not _affordable
+	# Пока быстрый режим закрыт, настройки забивки (переключатели) тоже недоступны.
+	for parameter_id in _option_buttons:
+		var buttons: Dictionary = _option_buttons[parameter_id]
+		for option_id in buttons:
+			(buttons[option_id] as Button).disabled = _quick_locked
+
+
 func _on_prepare_pressed() -> void:
-	if _selected_recipe_id.is_empty():
+	if _selected_recipe_id.is_empty() or _quick_locked:
 		return
 	var result := _service.preview(_selected_recipe_id, _choices)
 	if not result["ok"]:

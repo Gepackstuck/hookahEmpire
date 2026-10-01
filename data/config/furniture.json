@@ -41,6 +41,10 @@
     ],
     "required_cells": [
       [
+        15,
+        10
+      ],
+      [
         1,
         7
       ],
@@ -261,6 +265,160 @@
         "height": 64
       },
       "surface_height": 64
+    },
+    {
+      "id": "art_sponge",
+      "icon": "🖼️",
+      "name": "Губка-кальянщик",
+      "price": 90,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#6b4a26",
+        "texture": "res://art/paintings/sponge_hookah.png",
+        "title": "Губка-кальянщик"
+      }
+    },
+    {
+      "id": "art_anonymous",
+      "icon": "🖼️",
+      "name": "Аноним в дыму",
+      "price": 70,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#1c1c1f",
+        "texture": "res://art/paintings/anonymous_smoke.png",
+        "title": "Аноним в дыму"
+      }
+    },
+    {
+      "id": "art_boss",
+      "icon": "🖼️",
+      "name": "Босс",
+      "price": 100,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 3,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#8a6a2a",
+        "texture": "res://art/paintings/boss_whisper.png",
+        "title": "Босс"
+      }
+    },
+    {
+      "id": "art_rules",
+      "icon": "🖼️",
+      "name": "Мои правила",
+      "price": 50,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 1,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#2a2a2e",
+        "texture": "res://art/paintings/my_rules.png",
+        "title": "Мои правила"
+      }
+    },
+    {
+      "id": "art_stick",
+      "icon": "🖼️",
+      "name": "Палка в колесо",
+      "price": 60,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#4a3324",
+        "texture": "res://art/paintings/stick_wheel.png",
+        "title": "Палка в колесо"
+      }
+    },
+    {
+      "id": "art_neon",
+      "icon": "🖼️",
+      "name": "Неоновый кальян",
+      "price": 110,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 3,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#1c1c28",
+        "texture": "res://art/paintings/neon_hookah.png",
+        "title": "Неоновый кальян"
+      }
+    },
+    {
+      "id": "art_troll",
+      "icon": "🖼️",
+      "name": "Тролль-указка",
+      "price": 80,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#2a2a2e",
+        "texture": "res://art/paintings/troll_point.png",
+        "title": "Тролль-указка"
+      }
     }
   ]
 }

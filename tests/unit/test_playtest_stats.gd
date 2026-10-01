@@ -33,6 +33,7 @@ func test_repeat_visit_progress_returns_to_done() -> void:
 	var beats := StoryBeats.load_file("res://data/story/intro_beats.json")
 	assert_eq(beats.done_progress_for("friend_denis"), "friend_01_done")
 	assert_eq(beats.done_progress_for("friend_max"), "friend_02_done")
+	assert_eq(beats.done_progress_for("friend_ivan"), "friend_03_done")
 	assert_true(beats.is_in_progress_of("friend_denis", "friend_01_arrives"), "визит без разговора тоже завершается")
 	assert_true(beats.is_in_progress_of("friend_denis", "friend_01_intro_done"))
 	assert_true(not beats.is_in_progress_of("friend_denis", "friend_02_arrives"))

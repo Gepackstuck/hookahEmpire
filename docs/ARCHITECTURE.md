@@ -693,3 +693,16 @@ Gameplay-системы никогда не должны зависеть от �
 - `FurnitureLayer` — узлы мебели в мире (`GarageObject`), блокировка клеток `GarageGrid`, режим расстановки с «призраком». Создаётся через `GarageWorld.setup_furniture`.
 - `FurnitureContextMenu` — меню «переместить / повернуть / убрать» у предмета, выбранного кликом в мире (`FurnitureLayer.item_clicked`). Предметы с `surface_ok` ставятся на основания с `surface_height` (`FurnitureSystem.placement_info`, `surface_lift`).
 - `FurnitureScreen` — окно магазина и расстановки; `Main` связывает покупку/расстановку с экономикой и передаёт бонус в оценку (`SessionScoring.build_result(..., furniture_bonus)`).
+
+## M10: вводный срез
+- `IntroGuide` (чистая логика, `data/config/intro.json`): ворота разблокировок по числу обслуженных гостей, шаги цели, параметры Бэна.
+- `Buddy` — корутина-поведение Бэна поверх `Friend`; живёт вне `GarageWorld._objects`, диван получает от `Main` через `set_couch/clear_couch`.
+- Мебель-подарок: запись `FurnitureSystem` с `gift: true` (`grant_gift`, `gift_entry`, продажа запрещена, не считается в «обставь гараж»).
+- Картины с текстурой: `wall_picture` + `visual.texture` рисуется `GarageObject._draw_wall_texture`.
+- `Main` связывает всё: `_setup_m10`, `_apply_unlocks`, `_maybe_ben_arrival`, `_refresh_guide`, `_show_notice`, `_autopilot_furnish`.
+- Порядок отрисовки: `GarageWorld._sort_entities()` (y-сортировка, затем правило крупных объектов; настенные вывески/картины имеют нулевую глубину через `sort_rect()`; сидящий гость идёт сразу после своего стула). Клетки стульев блокируются в рантайме (`_ready`), а не в раскладке.
+- Ручная забивка: угли греются партиями (`ManualPreparation.batch_temps`, `average_heat`), всегда 3 угля (`max_coals`).
+- Замена углей идёт со стороны корзины: `hookah_coal_cell` в раскладке гаража.
+- Статистика (`PlaytestStats`): тайминги интро, журнал визитов (заказ/тренд/рецепт), список сильных рецептов.
+- Кликабельные предметы: картины (`image`), бумбокс (`kind: boombox` → действие `toggle_boombox`, `ChipTune` синтезирует мотив кодом), молоко 🥛 (`_drink_milk`).
+- Цель MVP: `progression.json` → `goal_recipes: 1`.

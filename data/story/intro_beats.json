@@ -51,6 +51,32 @@
         "facing": "right",
         "lift": 10
       }
+    },
+    {
+      "id": "ivan_arrives",
+      "requires_progress": "friend_02_done",
+      "delay": 4.0,
+      "action": "spawn_friend",
+      "guest": "friend_ivan",
+      "entry_position": [
+        0.3,
+        7.5
+      ],
+      "entry_cell": [
+        1,
+        7
+      ],
+      "stand_cell": [
+        12,
+        10
+      ],
+      "dialogue": "friend_ivan_intro",
+      "sets_progress": "friend_03_arrives",
+      "seat": {
+        "emoji": "🧘‍♂️",
+        "facing": "right",
+        "lift": 10
+      }
     }
   ]
 }

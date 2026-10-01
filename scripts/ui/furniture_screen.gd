@@ -11,6 +11,7 @@ signal place_requested(uid: String)
 signal drag_started(uid: String)
 signal remove_requested(uid: String)
 signal sell_requested(uid: String)
+signal preview_requested(texture_path: String, title: String)
 signal placement_cancel_requested
 
 const PANEL_WIDTH := 430.0
@@ -490,7 +491,23 @@ func _shop_card(data: Dictionary) -> Control:
 	if not affordable:
 		button.modulate = Color(1.0, 0.6, 0.55, 0.75)
 	button.pressed.connect(func() -> void: _try_buy(item_id, item_name, price))
-	box.add_child(button)
+	var preview_path := str((data.get("visual", {}) as Dictionary).get("texture", ""))
+	if preview_path.is_empty():
+		box.add_child(button)
+	else:
+		# Картины можно рассмотреть до покупки.
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 2)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(button)
+		var lens := Button.new()
+		lens.text = "🔍"
+		lens.tooltip_text = "Рассмотреть картину"
+		lens.focus_mode = Control.FOCUS_NONE
+		lens.add_theme_font_size_override("font_size", 14)
+		lens.pressed.connect(func() -> void: preview_requested.emit(preview_path, item_name))
+		row.add_child(lens)
+		box.add_child(row)
 	# Купить можно и кликом по самой карточке.
 	card.gui_input.connect(func(event: InputEvent) -> void:
 		var click := event as InputEventMouseButton
@@ -537,7 +554,11 @@ func _owned_card(entry: Dictionary) -> Control:
 	var sell_name := str(data["name"])
 	sell_button.pressed.connect(func() -> void:
 		_ask("Продать «%s» за %d 💰? Куплен он был дороже." % [sell_name, price], func() -> void: sell_requested.emit(uid)))
-	box.add_child(sell_button)
+	if bool(entry.get("gift", false)):
+		box.add_child(_info_label("🎁 подарок Бэна", 12, Color(1.0, 0.85, 0.5)))
+		sell_button.free()
+	else:
+		box.add_child(sell_button)
 	card.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
 			_press_uid = uid

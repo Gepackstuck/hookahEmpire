@@ -68,7 +68,7 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 		if kind == "stove_coal" or kind == "cold_stove_coal":
 			return not coal_overlaps(spot, state.stove_coals)
 		if kind == "hot_coal":
-			return state.hot_coals > 0 and not coal_overlaps(spot, state.stove_coals)
+			return state.can_return_hot_coal() and not coal_overlaps(spot, state.stove_coals)
 	if step == "coals" and kind == "hot_coal":
 		return state.hot_coals > 0 and state.coals.size() < state.config.manual_max_coals and not coal_overlaps(spot, state.coals)
 	return false
@@ -88,8 +88,11 @@ func _drop_data(at_position: Vector2, data: Variant) -> void:
 		if not coal_overlaps(spot, state.stove_coals):
 			# Уголь, вернувшийся на плитку (в том числе из ведёрка), снова греется.
 			if kind == "hot_coal":
-				state.hot_coals -= 1
-			state.stove_coals.append(spot)
+				state.return_hot_coal_to_stove(spot)
+			else:
+				if kind == "coal":
+					state.begin_batch_if_needed()
+				state.stove_coals.append(spot)
 			acted.emit("coal")
 	elif step == "coals" and kind == "hot_coal":
 		if not coal_overlaps(spot, state.coals) and state.add_coal(spot):
@@ -145,10 +148,14 @@ func _light_status() -> String:
 		return _notice
 	if state.is_burnt():
 		return "Подгорело! Выключи плитку" if state.stove_on else "Подгорело!"
+	if state.temperature_locked and state.stove_coals.is_empty() and state.hot_coals > 0 and state.total_coals() < state.config.manual_max_coals:
+		return "Можно положить ещё уголь и разогреть его отдельно — или идти дальше"
 	if state.temperature_locked:
 		return "Температура зафиксирована"
 	if state.stove_coals.is_empty():
 		if state.hot_coals > 0 or not state.coals.is_empty():
+			if state.total_coals() < state.config.manual_max_coals:
+				return "Горячие угли в ведёрке — можно дальше или разогреть ещё уголь отдельно"
 			return "Горячие угли в ведёрке — можно дальше"
 		return "Положи угли на плитку"
 	if state.stove_on:

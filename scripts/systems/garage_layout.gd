@@ -19,6 +19,8 @@ var objects: Array[Dictionary] = []
 var hookah_serve_cell: Vector2i = Vector2i(-1, -1)
 ## Клетка у стола для кальянов, куда игрок возвращается с кальяном для перезабивки.
 var hookah_prep_cell: Vector2i = Vector2i(-1, -1)
+## Клетка, с которой меняют угли: со стороны стола, где стоит лоток со свежими углями (M10).
+var hookah_coal_cell: Vector2i = Vector2i(-1, -1)
 ## Клетка стула, куда садится игрок, чтобы покурить вместе с гостем.
 var player_seat_cell: Vector2i = Vector2i(-1, -1)
 var errors: Array[String] = []
@@ -72,6 +74,13 @@ func _parse(data: Dictionary) -> void:
 			errors.append("layout: hookah_serve_cell должен быть [x, y] внутри гаража")
 		else:
 			hookah_serve_cell = Vector2i(serve_value)
+
+	if data.has("hookah_coal_cell"):
+		var coal_value: Variant = DataUtil.vec2(data["hookah_coal_cell"])
+		if coal_value == null or coal_value.x < 0 or coal_value.y < 0 or coal_value.x >= size.x or coal_value.y >= size.y:
+			errors.append("layout: hookah_coal_cell должен быть [x, y] внутри гаража")
+		else:
+			hookah_coal_cell = Vector2i(coal_value)
 
 	if data.has("hookah_prep_cell"):
 		var prep_value: Variant = DataUtil.vec2(data["hookah_prep_cell"])
