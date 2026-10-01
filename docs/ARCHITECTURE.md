@@ -686,3 +686,10 @@ Gameplay-системы никогда не должны зависеть от �
 - `EconomySystem` — баланс/репутация поверх `GameState` (`earn`, `spend`, `recipe_cost`, бесплатные ингредиенты, границы репутации; `data/config/economy.json`).
 - `ProgressionGoal` — «сильный рецепт» (`strong_trends` в записи рецепта), прогресс «n/3», флаги `mvp_goal_done` и `mvp_ending_seen`; финальный диалог `mvp_ending`.
 - `StatusHud` — только отображение; `Main` связывает системы (`_setup_m8`, `_apply_session_economy`, `_advance_trend`, `_maybe_play_ending`) и отдаёт экранам провайдеры `cost_info` / `trend_info`.
+
+## M9: мебель и кастомизация гаража
+
+- `FurnitureSystem` (`data/config/furniture.json`) — каталог, покупка, владение (`GameState.furniture`), проверка размещения (границы, наложения, зоны, стены, связность проходов), бонус комфорта/атмосферы с потолком. Чистая логика без нод.
+- `FurnitureLayer` — узлы мебели в мире (`GarageObject`), блокировка клеток `GarageGrid`, режим расстановки с «призраком». Создаётся через `GarageWorld.setup_furniture`.
+- `FurnitureContextMenu` — меню «переместить / повернуть / убрать» у предмета, выбранного кликом в мире (`FurnitureLayer.item_clicked`). Предметы с `surface_ok` ставятся на основания с `surface_height` (`FurnitureSystem.placement_info`, `surface_lift`).
+- `FurnitureScreen` — окно магазина и расстановки; `Main` связывает покупку/расстановку с экономикой и передаёт бонус в оценку (`SessionScoring.build_result(..., furniture_bonus)`).

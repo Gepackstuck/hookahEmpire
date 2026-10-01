@@ -31,6 +31,9 @@ const SIT_CAMERA_ZOOM := 3.0
 const FRIEND_TALK_RADIUS := 1.4
 
 var _grid: GarageGrid = null
+var _layout: GarageLayout = null
+## M9: мебель (создаётся из Main через setup_furniture).
+var _furniture_layer: FurnitureLayer = null
 var _interactions := InteractionSystem.new()
 var _player: Player = null
 var _objects: Dictionary = {} # id -> Node2D (GarageObject или Friend)
@@ -80,6 +83,7 @@ func _ready() -> void:
 			GameLog.error("garage", message)
 		return
 
+	_layout = layout
 	_grid = GarageGrid.new(layout.size)
 	_backdrop.setup(layout.size)
 	_serve_cell = layout.hookah_serve_cell
@@ -158,6 +162,77 @@ var _hover_hit: Dictionary = {}
 func set_camera_follow(follow: bool) -> void:
 	if _player != null:
 		_player.set_camera_follow(follow, _camera_bounds)
+
+
+## Свободная камера на время расстановки мебели: begin → pan (смещение мыши в пикселях) → end.
+func begin_free_camera() -> void:
+	if _player != null:
+		_player.begin_free_camera()
+
+
+func pan_camera(screen_delta: Vector2) -> void:
+	if _player != null:
+		_player.pan_camera(screen_delta)
+
+
+func end_free_camera() -> void:
+	if _player != null:
+		_player.end_free_camera()
+
+
+## M9: подключает систему мебели: комната берётся из описания гаража, мебель рисуется в мире и блокирует клетки сетки.
+func setup_furniture(system: FurnitureSystem) -> void:
+	if _layout == null or _grid == null or system == null:
+		return
+	system.set_room_from_layout(_layout)
+	var rugs := Node2D.new()
+	rugs.name = "Rugs"
+	add_child(rugs)
+	move_child(rugs, _entities.get_index())
+	_furniture_layer = FurnitureLayer.new()
+	_furniture_layer.name = "FurnitureLayer"
+	add_child(_furniture_layer)
+	_furniture_layer.setup(system, _grid, _entities, rugs)
+	_furniture_layer.validator = _furniture_validator
+
+
+## Облачка и чипы над головами делаем полупрозрачными (например, пока открыто окно мебели).
+func set_head_labels_alpha(alpha: float) -> void:
+	if _player != null:
+		_player.head_labels().modulate.a = alpha
+	for node in _objects.values():
+		if node is Friend:
+			(node as Friend).head_labels().modulate.a = alpha
+
+
+func furniture_layer() -> FurnitureLayer:
+	return _furniture_layer
+
+
+## Нельзя ставить непроходимую мебель туда, где сейчас стоит игрок или гость (иначе они застрянут).
+func _furniture_validator(item_id: String, cell: Vector2, rotation: int, _uid: String) -> String:
+	var system := _furniture_layer.system
+	var data := system.item(item_id)
+	if data.is_empty() or not bool(data["blocks"]) or str(data["placement"]) == "wall":
+		return ""
+	var rect := system.rect_of(item_id, cell, rotation).grow(0.05)
+	for body in _character_bodies():
+		if rect.intersects(body):
+			return "Здесь стоит персонаж"
+	return ""
+
+
+## Прямоугольники (в клетках), которые сейчас занимают игрок и гости.
+func _character_bodies() -> Array[Rect2]:
+	var bodies: Array[Rect2] = []
+	if _player != null:
+		var half := Player.HALF_EXTENT + 0.1
+		bodies.append(Rect2(_player.grid_position - Vector2(half, half), Vector2(half, half) * 2.0))
+	for node in _objects.values():
+		if node is Friend:
+			var friend_pos: Vector2 = (node as Friend).grid_position
+			bodies.append(Rect2(friend_pos - Vector2(0.4, 0.4), Vector2(0.8, 0.8)))
+	return bodies
 
 
 func set_pointer_enabled(value: bool) -> void:

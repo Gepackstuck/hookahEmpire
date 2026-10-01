@@ -101,8 +101,8 @@ func context_score(components: Dictionary) -> float:
 
 
 ## FinalScore = clamp(ContextScore - штрафы, 0, 100), округление до 0.1.
-func final_score(context: float, heat_penalty: float = 0.0, service_penalty: float = 0.0) -> float:
-	return snappedf(clampf(context - heat_penalty - service_penalty, 0.0, 100.0), 0.1)
+func final_score(context: float, heat_penalty: float = 0.0, service_penalty: float = 0.0, bonus: float = 0.0) -> float:
+	return snappedf(clampf(context + bonus - heat_penalty - service_penalty, 0.0, 100.0), 0.1)
 
 
 ## Полоса удовлетворения для итоговой оценки.
@@ -134,7 +134,7 @@ func evaluate(taste: Dictionary, recipe: Dictionary, execution_score: float, cat
 		"execution": execution_score,
 	}
 	var used_trend := trend_current if trend_id.is_empty() else trend_id
-	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(used_trend), used_trend)
+	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(used_trend), used_trend, float(extras.get("furniture_bonus", 0.0)))
 
 
 ## Пересчёт готового итога со штрафами (жар, redo): компоненты берутся из итога, поля гостя/рецепта сохраняются.
@@ -142,7 +142,7 @@ func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 
 	var components := {}
 	for key in COMPONENTS:
 		components[key] = float(verdict.get(key, 0.0))
-	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")), str(verdict.get("trend_id", "")))
+	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")), str(verdict.get("trend_id", "")), float(verdict.get("furniture_bonus", 0.0)))
 	for key in ["guest_id", "recipe_id", "phrase"]:
 		if verdict.has(key):
 			result[key] = verdict[key]
@@ -150,9 +150,9 @@ func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 
 
 
 ## Собирает итог из компонентов (отдельно от evaluate — для детерминированных тестов).
-func build_result(components: Dictionary, heat_penalty: float = 0.0, service_penalty: float = 0.0, profile: Dictionary = {}, trend_label: String = "", trend_key: String = "") -> Dictionary:
+func build_result(components: Dictionary, heat_penalty: float = 0.0, service_penalty: float = 0.0, profile: Dictionary = {}, trend_label: String = "", trend_key: String = "", furniture_bonus: float = 0.0) -> Dictionary:
 	var context := context_score(components)
-	var final := final_score(context, heat_penalty, service_penalty)
+	var final := final_score(context, heat_penalty, service_penalty, furniture_bonus)
 	var band := band_for(final)
 	return {
 		"recipe_quality": float(components["recipe_quality"]),
@@ -163,6 +163,7 @@ func build_result(components: Dictionary, heat_penalty: float = 0.0, service_pen
 		"execution": float(components["execution"]),
 		"heat_penalty": heat_penalty,
 		"service_penalty": service_penalty,
+		"furniture_bonus": furniture_bonus,
 		"context_score": snappedf(context, 0.1),
 		"final_score": final,
 		"band_id": str(band["id"]),

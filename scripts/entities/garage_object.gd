@@ -86,6 +86,16 @@ func setup(definition: Dictionary) -> void:
 			top_y = -float(_visual.get("height", 24.0)) - 6.0
 		"chair":
 			top_y = -50.0
+		"couch":
+			top_y = -52.0
+		"bookcase":
+			top_y = -float(_visual.get("height", 64.0)) - 6.0
+		"lamp":
+			top_y = -96.0
+		"rug":
+			top_y = -4.0
+		"wall_picture":
+			top_y = -98.0
 		"door":
 			top_y = -float(_visual.get("height", 76.0)) - 6.0
 		"shelf":
@@ -198,6 +208,16 @@ func _draw() -> void:
 			_draw_table()
 		"chair":
 			_draw_chair()
+		"couch":
+			_draw_couch()
+		"bookcase":
+			_draw_bookcase()
+		"lamp":
+			_draw_lamp()
+		"rug":
+			_draw_rug()
+		"wall_picture":
+			_draw_wall_picture()
 		"door":
 			_draw_door()
 		"shelf":
@@ -605,6 +625,133 @@ func _draw_chair() -> void:
 		_chair_box(corner - Vector2(leg, leg), corner + Vector2(leg, leg), 0.0, 14.0, color.darkened(0.15))
 	_chair_box(Vector2(-0.36, -0.36), Vector2(0.36, 0.36), 14.0, 20.0, color)
 	_chair_box(Vector2(-0.38, -0.36), Vector2(-0.26, 0.36), 20.0, 48.0, color.lightened(0.05))
+
+
+## M9: мягкая тень на полу под мебелью (прямоугольник чуть больше основания).
+func _floor_shadow(pad: float = 0.1, alpha: float = 0.18) -> void:
+	var half := Vector2(_footprint) * 0.5
+	draw_colored_polygon(PackedVector2Array([
+		IsoProjection.grid_to_screen(Vector2(-half.x - pad, -half.y - pad)),
+		IsoProjection.grid_to_screen(Vector2(half.x + pad, -half.y - pad)),
+		IsoProjection.grid_to_screen(Vector2(half.x + pad, half.y + pad)),
+		IsoProjection.grid_to_screen(Vector2(-half.x - pad, half.y + pad))]), Color(0, 0, 0, alpha))
+
+
+## M9: диван — ножки, сплошное основание, сиденье, спинка с дальней стороны (-y, а при повороте -x) и два подлокотника.
+func _draw_couch() -> void:
+	var half := Vector2(_footprint) * 0.5
+	var color := Color.html(str(_visual.get("color", "#5b6fa8")))
+	var along_x := _footprint.x >= _footprint.y
+	_floor_shadow(0.1, 0.2)
+	var depth := 0.3
+	var arm := 0.26
+	# Ножки по углам основания (рисуются первыми: основание закрывает их верх).
+	var leg := color.darkened(0.6)
+	var inset := 0.1
+	var leg_size := 0.12
+	for corner_x in [-half.x + inset, half.x - inset - leg_size]:
+		for corner_y in [-half.y + inset, half.y - inset - leg_size]:
+			_draw_iso_box(Vector2(corner_x, corner_y), Vector2(corner_x + leg_size, corner_y + leg_size), 0.0, 6.0, leg)
+	# Основание на всю площадь дивана.
+	_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, half.y), 6.0, 14.0, color.darkened(0.25))
+	if along_x:
+		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, -half.y + depth), 14.0, 46.0, color.darkened(0.1))
+		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(-half.x + arm, half.y), 14.0, 30.0, color.darkened(0.05))
+		_draw_iso_box(Vector2(-half.x + arm, -half.y + depth), Vector2(half.x - arm, half.y), 14.0, 22.0, color.lightened(0.08))
+		_draw_iso_box(Vector2(half.x - arm, -half.y), Vector2(half.x, half.y), 14.0, 30.0, color)
+	else:
+		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(-half.x + depth, half.y), 14.0, 46.0, color.darkened(0.1))
+		_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, -half.y + arm), 14.0, 30.0, color.darkened(0.05))
+		_draw_iso_box(Vector2(-half.x + depth, -half.y + arm), Vector2(half.x, half.y - arm), 14.0, 22.0, color.lightened(0.08))
+		_draw_iso_box(Vector2(-half.x, half.y - arm), Vector2(half.x, half.y), 14.0, 30.0, color)
+
+
+## Бокс в осях «вдоль / вглубь»: u — вдоль длинной стороны, v — вглубь (минус — задняя стенка).
+func _axis_box(along_x: bool, u0: float, u1: float, v0: float, v1: float, z0: float, z1: float, color: Color) -> void:
+	if along_x:
+		_draw_iso_box(Vector2(u0, v0), Vector2(u1, v1), z0, z1, color)
+	else:
+		_draw_iso_box(Vector2(v0, u0), Vector2(v1, u1), z0, z1, color)
+
+
+## M9: открытая полка — задняя стенка, боковины, доски и несколько книжек.
+func _draw_bookcase() -> void:
+	var along_x := _footprint.x >= _footprint.y
+	var long_half := (float(_footprint.x) if along_x else float(_footprint.y)) * 0.5
+	var deep_half := (float(_footprint.y) if along_x else float(_footprint.x)) * 0.5
+	var color := Color.html(str(_visual.get("color", "#7a5b3a")))
+	var height := float(_visual.get("height", 64.0))
+	_floor_shadow(0.08, 0.2)
+	var wall := 0.08
+	_axis_box(along_x, -long_half, long_half, -deep_half, -deep_half + wall, 0.0, height, color.darkened(0.35))
+	_axis_box(along_x, -long_half, -long_half + wall, -deep_half, deep_half, 0.0, height, color.darkened(0.1))
+	var levels: Array[float] = [3.0, 23.0, 43.0, height - 3.0]
+	var book_colors: Array[Color] = [Color("#c0504d"), Color("#4f81bd"), Color("#9bbb59"), Color("#f2c14e"), Color("#8064a2"), Color("#e8e0d0")]
+	for level_index in levels.size():
+		var z := levels[level_index]
+		_axis_box(along_x, -long_half + wall, long_half - wall, -deep_half + wall, deep_half, z, z + 3.0, color.lightened(0.05))
+		if level_index == levels.size() - 1:
+			continue
+		var u := -long_half + wall + 0.12
+		var book_index := level_index * 2
+		while u < long_half - wall - 0.2:
+			var thickness := 0.07 + 0.03 * float((book_index * 7) % 3)
+			var book_height := 13.0 + float((book_index * 5) % 4) * 1.5
+			_axis_box(along_x, u, u + thickness, -deep_half + wall + 0.05, -deep_half + wall + 0.42, z + 3.0, z + 3.0 + book_height, book_colors[book_index % book_colors.size()])
+			u += thickness + 0.02
+			book_index += 1
+			if level_index == 1 and book_index % 5 == 0:
+				u += 0.3
+	_axis_box(along_x, long_half - wall, long_half, -deep_half, deep_half, 0.0, height, color)
+
+
+## M9: торшер — основание, стойка, абажур и тёплое свечение.
+func _draw_lamp() -> void:
+	IsoDraw.draw_shadow(self, 16.0)
+	var shade := Color.html(str(_visual.get("color", "#ffd98a")))
+	draw_circle(Vector2(0, -70), 46.0, Color(shade.r, shade.g, shade.b, 0.08))
+	draw_circle(Vector2(0, -70), 28.0, Color(shade.r, shade.g, shade.b, 0.12))
+	draw_colored_polygon(PackedVector2Array([Vector2(-9, -1), Vector2(0, -5), Vector2(9, -1), Vector2(0, 3)]), Color("#2c2c34"))
+	draw_line(Vector2(0, -2), Vector2(0, -66), Color("#3b3b46"), 3.0)
+	draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(14, -62), Vector2(9, -86), Vector2(-9, -86)]), shade.darkened(0.15))
+	draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(0, -60), Vector2(0, -86), Vector2(-9, -86)]), shade.lightened(0.15))
+	draw_line(Vector2(-9, -86), Vector2(9, -86), shade.lightened(0.4), 1.5)
+
+
+## M9: ковёр — плоский, с каймой и узором (рисуется под остальной мебелью).
+func _draw_rug() -> void:
+	var half := Vector2(_footprint) * 0.5
+	var color := Color.html(str(_visual.get("color", "#a8453d")))
+	_draw_iso_box(Vector2(-half.x, -half.y), Vector2(half.x, half.y), 0.0, 1.5, color.darkened(0.25))
+	_draw_iso_box(Vector2(-half.x + 0.14, -half.y + 0.14), Vector2(half.x - 0.14, half.y - 0.14), 0.0, 2.0, color)
+	_draw_iso_box(Vector2(-half.x + 0.34, -half.y + 0.34), Vector2(half.x - 0.34, half.y - 0.34), 0.0, 2.4, color.lightened(0.18))
+	_draw_iso_box(Vector2(-half.x + 0.55, -half.y + 0.55), Vector2(half.x - 0.55, half.y - 0.55), 0.0, 2.8, color.darkened(0.1))
+
+
+## Точка на плоскости стены под картиной: t в 0..1 вдоль стены, z — высота над полом.
+func _wall_point(t: float, z: float) -> Vector2:
+	var half := Vector2(_footprint) * 0.5
+	var along_x := _footprint.x >= _footprint.y
+	var p := Vector2(-half.x + t * float(_footprint.x), -half.y) if along_x else Vector2(-half.x, -half.y + t * float(_footprint.y))
+	return IsoProjection.grid_to_screen(p) + Vector2(0, -z)
+
+
+## M9: картина на стене — рама и пейзаж (небо, солнце, холмы).
+func _draw_wall_picture() -> void:
+	var frame := Color.html(str(_visual.get("color", "#4a3324")))
+	var z0 := 44.0
+	var z1 := 96.0
+	var corners := PackedVector2Array([_wall_point(0.05, z0), _wall_point(0.95, z0), _wall_point(0.95, z1), _wall_point(0.05, z1)])
+	draw_colored_polygon(corners, frame)
+	var inner0 := z0 + 5.0
+	var inner1 := z1 - 5.0
+	draw_colored_polygon(PackedVector2Array([_wall_point(0.1, inner0), _wall_point(0.9, inner0), _wall_point(0.9, inner1), _wall_point(0.1, inner1)]), Color("#8fc3e8"))
+	var sun := (_wall_point(0.72, inner1 - 11.0))
+	draw_circle(sun, 5.0, Color("#ffd45a"))
+	var span := inner1 - inner0
+	draw_colored_polygon(PackedVector2Array([_wall_point(0.1, inner0), _wall_point(0.9, inner0), _wall_point(0.9, inner0 + span * 0.32), _wall_point(0.66, inner0 + span * 0.5), _wall_point(0.45, inner0 + span * 0.3), _wall_point(0.1, inner0 + span * 0.42)]), Color("#5f9e63"))
+	draw_colored_polygon(PackedVector2Array([_wall_point(0.1, inner0), _wall_point(0.9, inner0), _wall_point(0.9, inner0 + span * 0.16), _wall_point(0.55, inner0 + span * 0.28), _wall_point(0.1, inner0 + span * 0.2)]), Color("#437a4a"))
+	draw_polyline(PackedVector2Array([corners[0], corners[1], corners[2], corners[3], corners[0]]), frame.lightened(0.3), 1.5)
 
 
 ## Стул смотрит вдоль x (спинка со стороны -x) или вдоль y (visual.facing = "y": спинка со стороны -y).

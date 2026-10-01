@@ -23,6 +23,15 @@ var _economy: EconomySystem = null
 var _goal: ProgressionGoal = null
 var _hud: StatusHud = null
 var _hud_timer := 0.0
+## M9: мебель (декор): магазин, расстановка, бонус к оценке.
+var _furniture: FurnitureSystem = null
+var _furniture_screen: FurnitureScreen = null
+var _furniture_button: Button = null
+var _furniture_menu: FurnitureContextMenu = null
+var _furniture_paused := false
+var _saved_time_scale := 1.0
+## Масштаб времени на паузе (не 0, чтобы нигде не делить на нулевой delta).
+const FURNITURE_PAUSE_SCALE := 0.0001
 var _pending_cost := 0
 var _summary: SessionSummaryScreen = null
 var _viewer: ImageViewer = null
@@ -139,6 +148,7 @@ func _ready() -> void:
 		_setup_summary_screen()
 		_setup_image_viewer()
 		_setup_m8()
+		_setup_m9()
 	_effects = StoryEffects.new(_state)
 	_runner.effect_requested.connect(_effects.apply)
 	_refresh_objective()
@@ -347,9 +357,9 @@ func _with_order_text(dialogue: Dictionary) -> Dictionary:
 ## Игра "заморожена" для мира, пока открыт любой экран или идёт диалог.
 func _update_input_lock() -> void:
 	# Мышь (маски, книги, свиток) работает, пока не открыто окно или диалог.
-	_garage.set_pointer_enabled(not (_mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) \
+	_garage.set_pointer_enabled(not (_mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() \
 		or (_summary != null and _summary.visible) or (_viewer != null and _viewer.visible) or (_runner.is_active and not _autopilot)))
-	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or (_summary != null and _summary.visible) or _runner.is_active or _autopilot)
+	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() or (_summary != null and _summary.visible) or _runner.is_active or _autopilot)
 
 
 func _on_action_requested(action_id: String) -> void:
@@ -409,7 +419,7 @@ func _on_prepared(result: Dictionary) -> void:
 				taste["preferences"] = _order["preferences"]
 				taste["dislikes"] = _order.get("dislikes", taste["dislikes"])
 			var recipe := _recipes.get_recipe(result["recipe_id"])
-			verdict = _scoring.evaluate(taste, recipe, float(result["execution_score"]), _recipes.catalog, _recipes.config)
+			verdict = _scoring.evaluate(taste, recipe, float(result["execution_score"]), _recipes.catalog, _recipes.config, {"furniture_bonus": _furniture.score_bonus() if _furniture != null else 0.0})
 			verdict["guest_id"] = guest_id
 			verdict["recipe_id"] = str(result["recipe_id"])
 			_recipes.record_session(str(result["recipe_id"]), float(verdict["final_score"]), guest_id, int(verdict["payment"]))
@@ -836,7 +846,7 @@ func _run_smoking_phase(guest_id: String, verdict: Dictionary, token: int) -> Di
 
 ## Ждёт, пока игрок закончит диалог/закроет окна (чтобы прощание не легло поверх них).
 func _wait_until_free() -> void:
-	while _runner.is_active or _mixer.visible or _book.visible or _preparation_screen.visible \
+	while _runner.is_active or _mixer.visible or _book.visible or _preparation_screen.visible or _furniture_open() \
 			or (_manual_screen != null and _manual_screen.visible) or (_summary != null and _summary.visible):
 		await get_tree().process_frame
 
@@ -968,7 +978,7 @@ func _autopilot_loop() -> void:
 func _autopilot_step() -> void:
 	if _recipes == null or _preparation == null or _scoring == null or _state == null:
 		return
-	if _carrying or _guest_departing or _runner.is_active or _mixer.visible or _book.visible \
+	if _carrying or _guest_departing or _runner.is_active or _mixer.visible or _book.visible or _furniture_open() \
 			or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _summary.visible:
 		return
 	if _redo_requested:
@@ -1034,7 +1044,7 @@ func _autopilot_needs_action() -> bool:
 func _autopilot_busy() -> bool:
 	return _carrying or _guest_departing or _runner.is_active or _mixer.visible or _book.visible \
 		or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _summary.visible \
-		or (_viewer != null and _viewer.visible)
+		or (_viewer != null and _viewer.visible) or _furniture_open()
 
 
 ## Один «заход» простоя: идёт к случайному объекту (не к тому же, что в прошлый раз) и 3–6 с делает вид, что работает.
@@ -1634,6 +1644,218 @@ func _maybe_play_ending() -> void:
 	_update_input_lock()
 
 
+## M9: окно мебели (кнопка 🛋️): магазин, расстановка, перемещение и уборка предметов.
+func _setup_m9() -> void:
+	_furniture = FurnitureSystem.load_default(_state, _economy)
+	for message in _furniture.errors:
+		GameLog.error("furniture", message)
+	if not _furniture.is_valid():
+		return
+	_garage.setup_furniture(_furniture)
+	var layer := _garage.furniture_layer()
+	if layer == null:
+		return
+	if not _furniture.base_layout_connected():
+		GameLog.error("furniture", "Базовая планировка гаража: не все рабочие клетки достижимы от двери (проверьте room.required_cells)")
+	_furniture_screen = FurnitureScreen.new()
+	$UI/Root.add_child(_furniture_screen)
+	_furniture_screen.setup(_furniture, _economy)
+	_furniture_screen.closed.connect(_on_furniture_closed)
+	_furniture_screen.buy_requested.connect(_on_furniture_buy)
+	_furniture_screen.place_requested.connect(_on_furniture_place_requested)
+	_furniture_screen.remove_requested.connect(_on_furniture_remove)
+	_furniture_screen.drag_started.connect(_on_furniture_drag_started)
+	_furniture_screen.sell_requested.connect(_on_furniture_sell)
+	layer.ui_blocker = _furniture_pointer_over_ui
+	layer.drag_started.connect(_on_furniture_drag_started)
+	_furniture_screen.placement_cancel_requested.connect(func() -> void: layer.cancel_placement())
+	_furniture_menu = FurnitureContextMenu.new()
+	$UI/Root.add_child(_furniture_menu)
+	_furniture_menu.move_requested.connect(_on_furniture_place_requested)
+	_furniture_menu.rotate_requested.connect(_on_furniture_rotate)
+	_furniture_menu.remove_requested.connect(_on_furniture_remove)
+	layer.item_clicked.connect(_on_furniture_item_clicked)
+	layer.placement_confirmed.connect(_on_furniture_placed)
+	layer.placement_cancelled.connect(_on_furniture_placement_cancelled)
+	layer.hint_changed.connect(_furniture_screen.show_problem)
+	_furniture_button = Button.new()
+	_furniture_button.text = "🛋️"
+	_furniture_button.tooltip_text = "Мебель: магазин и расстановка"
+	_furniture_button.focus_mode = Control.FOCUS_NONE
+	_furniture_button.add_theme_font_size_override("font_size", 28)
+	_furniture_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_furniture_button.offset_left = 16.0
+	_furniture_button.offset_top = 126.0
+	_furniture_button.offset_right = 72.0
+	_furniture_button.offset_bottom = 178.0
+	_furniture_button.pressed.connect(_toggle_furniture_screen)
+	$UI/Root.add_child(_furniture_button)
+
+
+## Мышь над панелью мебели или меню предмета.
+func _furniture_pointer_over_ui() -> bool:
+	if _furniture_screen == null:
+		return false
+	var mouse := _furniture_screen.get_global_mouse_position()
+	if _furniture_screen.visible and _furniture_screen.get_global_rect().has_point(mouse):
+		return true
+	return _furniture_menu != null and _furniture_menu.visible and _furniture_menu.get_global_rect().has_point(mouse)
+
+
+## Режим мебели: камера двигается зажатым колесом мыши (экранная дельта).
+func _input(event: InputEvent) -> void:
+	if not _furniture_open():
+		return
+	var motion := event as InputEventMouseMotion
+	if motion != null and (motion.button_mask & MOUSE_BUTTON_MASK_MIDDLE) != 0:
+		_garage.pan_camera(motion.relative)
+
+
+func _furniture_open() -> bool:
+	return _furniture_screen != null and _furniture_screen.visible
+
+
+func _toggle_furniture_screen() -> void:
+	if _furniture_screen == null:
+		return
+	if _furniture_screen.visible:
+		_furniture_screen.close()
+		return
+	_furniture_screen.open()
+	_garage.begin_free_camera()
+	if _furniture_button != null:
+		_furniture_button.visible = false
+	var layer := _garage.furniture_layer()
+	if layer != null:
+		layer.set_selection_enabled(true)
+	_set_furniture_pause(true)
+	_update_input_lock()
+
+
+func _on_furniture_closed() -> void:
+	var layer := _garage.furniture_layer()
+	if layer != null:
+		layer.cancel_placement(false)
+		layer.set_selection_enabled(false)
+	if _furniture_menu != null:
+		_furniture_menu.close()
+	_garage.end_free_camera()
+	if _furniture_button != null:
+		_furniture_button.visible = true
+	_set_furniture_pause(false)
+	_update_input_lock()
+
+
+## Пока окно мебели открыто, вся игра стоит (время почти останавливается), а диалоги и облачка полупрозрачны.
+func _set_furniture_pause(on: bool) -> void:
+	if on and not _furniture_paused:
+		_saved_time_scale = Engine.time_scale
+		Engine.time_scale = FURNITURE_PAUSE_SCALE
+		_furniture_paused = true
+	elif not on and _furniture_paused:
+		Engine.time_scale = _saved_time_scale
+		_furniture_paused = false
+	_dialogue_box.modulate.a = 0.2 if on else 1.0
+	_garage.set_head_labels_alpha(0.25 if on else 1.0)
+
+
+func _on_furniture_item_clicked(uid: String, screen_position: Vector2) -> void:
+	if uid == "":
+		_furniture_menu.close()
+		return
+	var entry := _furniture.entry_of(uid)
+	if entry.is_empty():
+		return
+	var data := _furniture.item(str(entry["item"]))
+	_furniture_menu.open_for(uid, "%s %s" % [str(data.get("icon", "")), str(data["name"])], bool(data["rotation_allowed"]), screen_position)
+
+
+func _on_furniture_rotate(uid: String) -> void:
+	var result := _furniture.rotate_in_place(uid)
+	if result["ok"]:
+		_stats.bump("furniture_rotated")
+		_furniture_screen.notify("Повернули. ПКМ по мебели — меню.")
+		_furniture_menu.close()
+	else:
+		_furniture_screen.notify("⛔ %s" % str(result["error"]))
+
+
+func _on_furniture_buy(item_id: String) -> void:
+	var result := _furniture.buy(item_id)
+	if result["ok"]:
+		var price := int(_furniture.item(item_id)["price"])
+		_stats.bump("furniture_bought")
+		_stats.bump("furniture_spent", price)
+		_furniture_screen.notify("Куплено: %s (−%d 💰). Он во вкладке «В наличии»: потяните его в гараж." % [str(_furniture.item(item_id)["name"]), price])
+		_furniture_screen.show_toast("🛒 Куплено: %s (−%d 💰)" % [str(_furniture.item(item_id)["name"]), price])
+	else:
+		_furniture_screen.notify("⛔ %s" % str(result["error"]))
+
+
+func _on_furniture_place_requested(uid: String) -> void:
+	_start_furniture_placement(uid, false)
+
+
+## Предмет потянули мышью (из списка «В наличии» или прямо в мире): ставится по отпусканию кнопки.
+func _on_furniture_drag_started(uid: String) -> void:
+	_start_furniture_placement(uid, true)
+
+
+func _start_furniture_placement(uid: String, dragging: bool) -> void:
+	var entry := _furniture.entry_of(uid)
+	if entry.is_empty():
+		return
+	var layer := _garage.furniture_layer()
+	_furniture_menu.close()
+	_furniture_screen.set_placing(true, str(_furniture.item(str(entry["item"]))["name"]))
+	layer.begin_placement(uid, dragging)
+
+
+func _on_furniture_placed(cell: Vector2, rotation: int) -> void:
+	var layer := _garage.furniture_layer()
+	var uid := layer.placing_uid()
+	var result := _furniture.place(uid, cell, rotation)
+	if result["ok"]:
+		_stats.bump("furniture_placed")
+		layer.cancel_placement(false)
+		_furniture_screen.set_placing(false)
+		var detached := int(result.get("detached", 0))
+		_furniture_screen.notify("Поставили." if detached == 0 else "Поставили. Предметы со стола вернулись на склад: %d." % detached)
+		_furniture_screen.refresh()
+	else:
+		_furniture_screen.notify("⛔ %s" % str(result["error"]))
+
+
+func _on_furniture_placement_cancelled() -> void:
+	_furniture_screen.set_placing(false)
+	_furniture_screen.refresh()
+
+
+func _on_furniture_sell(uid: String) -> void:
+	var layer := _garage.furniture_layer()
+	if layer != null and layer.placing_uid() == uid:
+		layer.cancel_placement(false)
+		_furniture_screen.set_placing(false)
+	var entry := _furniture.entry_of(uid)
+	if entry.is_empty():
+		return
+	var item_name := str(_furniture.item(str(entry["item"]))["name"])
+	var result := _furniture.sell(uid)
+	if result["ok"]:
+		_stats.bump("furniture_sold")
+		_stats.bump("furniture_sold_income", int(result["price"]))
+		_furniture_screen.notify("Продано: %s (+%d 💰)." % [item_name, int(result["price"])])
+		_furniture_screen.show_toast("💰 Продано: %s (+%d 💰)" % [item_name, int(result["price"])])
+	else:
+		_furniture_screen.notify("⛔ %s" % str(result["error"]))
+
+
+func _on_furniture_remove(uid: String) -> void:
+	if _furniture.remove(uid):
+		_stats.bump("furniture_removed")
+		_furniture_screen.notify("Убрали на склад." if _furniture.last_detached == 0 else "Убрали на склад вместе с предметами сверху (%d)." % _furniture.last_detached)
+
+
 func _debug_next_trend() -> void:
 	if _trends != null and _trends.is_valid():
 		_trends.set_trend(_trends.next_id())
@@ -1662,10 +1884,14 @@ func _debug_reset_goal() -> void:
 
 ## Ускорение всей игры для тестов (Engine.time_scale): таймеры, твины, ходьба, жар, анимации.
 func _set_game_speed(value: float) -> void:
-	Engine.time_scale = clampf(value, 0.1, 10.0)
+	var scale := clampf(value, 0.1, 10.0)
+	if _furniture_paused:
+		_saved_time_scale = scale
+	else:
+		Engine.time_scale = scale
 	if _stats_panel != null:
-		_stats_panel.show_speed(Engine.time_scale)
-	GameLog.info("test", "Скорость игры ×%.0f" % Engine.time_scale)
+		_stats_panel.show_speed(scale)
+	GameLog.info("test", "Скорость игры ×%.0f" % scale)
 
 
 func _exit_tree() -> void:
@@ -1681,7 +1907,7 @@ func _toggle_stats_panel() -> void:
 func _stats_lines() -> Array[String]:
 	var lines: Array[String] = []
 	lines.append("— СЕЙЧАС —")
-	lines.append("Режим: %s, скорость ×%.0f" % ["NPC (автопилот)" if _autopilot else "ручной", Engine.time_scale])
+	lines.append("Режим: %s, скорость ×%.0f%s" % ["NPC (автопилот)" if _autopilot else "ручной", _saved_time_scale if _furniture_paused else Engine.time_scale, " (пауза: мебель)" if _furniture_paused else ""])
 	lines.append("Сюжет: %s" % _state.story_progress)
 	var guest_id := _garage.ready_friend_id()
 	var guest_name := str(GuestCatalog.load_guest(guest_id).get("name", guest_id)) if guest_id != "" else "—"
@@ -1696,6 +1922,9 @@ func _stats_lines() -> Array[String]:
 		lines.append("Жар: — (гость не курит)")
 	lines.append("Мундштуков в коробке: %d" % _garage.mouthpiece_count())
 	lines.append("Деньги: %d, репутация: %d" % [_state.money, _state.reputation])
+	if _furniture != null and _furniture.is_valid():
+		var furniture_totals := _furniture.totals()
+		lines.append("Мебель: расставлено %d из %d, комфорт %d, атмосфера %d, бонус к оценке +%.1f" % [int(furniture_totals["placed"]), _furniture.owned_count(), int(furniture_totals["comfort"]), int(furniture_totals["atmosphere"]), float(furniture_totals["bonus"])])
 	if _trends != null and _goal != null:
 		lines.append("Тренд: %s (ещё %d виз.), далее: %s" % [_trends.current_name(), _trends.visits_left, _trends.name_of(_trends.next_id())])
 		lines.append("Цель: сильных рецептов %s%s" % [_goal.progress_text(_state.recipes), " — ВЫПОЛНЕНА" if _goal.is_complete(_state.recipes) else ""])

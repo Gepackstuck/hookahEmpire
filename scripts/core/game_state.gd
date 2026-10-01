@@ -20,6 +20,9 @@ var story_progress: String = DEFAULT_STORY_PROGRESS
 ## M8: текущий тренд и сколько визитов гостей осталось до его смены ("" — тренд ещё не выбран).
 var current_trend_id: String = ""
 var trend_visits_left: int = 0
+## M9: купленная мебель — [{"uid", "item", "cell": [x, y], "rotation": 0|1, "placed": bool}].
+var furniture: Array = []
+var furniture_seq: int = 0
 ## Сюжетные флаги: стабильный id флага -> значение (bool/число/строка).
 var story_flags: Dictionary = {}
 ## Рецепты игрока: id рецепта -> запись (см. RecipeSystem).
@@ -77,6 +80,8 @@ func reset_to_defaults() -> void:
 	set_story_progress(DEFAULT_STORY_PROGRESS)
 	current_trend_id = ""
 	trend_visits_left = 0
+	furniture = []
+	furniture_seq = 0
 	story_flags.clear()
 	recipes.clear()
 	recipe_seq = 0
@@ -90,6 +95,8 @@ func to_dict() -> Dictionary:
 		"story_progress": story_progress,
 		"current_trend_id": current_trend_id,
 		"trend_visits_left": trend_visits_left,
+		"furniture": furniture.duplicate(true),
+		"furniture_seq": furniture_seq,
 		"story_flags": story_flags.duplicate(true),
 		"recipes": recipes.duplicate(true),
 		"recipe_seq": recipe_seq,
@@ -103,6 +110,13 @@ func apply_dict(data: Dictionary) -> void:
 	set_story_progress(str(data.get("story_progress", DEFAULT_STORY_PROGRESS)))
 	current_trend_id = str(data.get("current_trend_id", ""))
 	trend_visits_left = int(data.get("trend_visits_left", 0))
+	furniture = []
+	var raw_furniture: Variant = data.get("furniture", [])
+	if raw_furniture is Array:
+		for entry in raw_furniture:
+			if entry is Dictionary:
+				furniture.append((entry as Dictionary).duplicate(true))
+	furniture_seq = int(data.get("furniture_seq", 0))
 	var flags: Variant = data.get("story_flags", {})
 	story_flags = (flags as Dictionary).duplicate(true) if flags is Dictionary else {}
 	var rec: Variant = data.get("recipes", {})

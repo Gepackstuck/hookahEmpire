@@ -90,6 +90,7 @@ func summary_lines() -> Array[String]:
 	lines.append("Перезабивок: просили %d, сделано %d" % [count("redo_requested"), count("redo")])
 	lines.append("Мундштуки доложены: %d раз (в простое %d)" % [count("mouthpiece_refill"), count("mouthpiece_refill_idle")])
 	lines.append("Экономика: заработано %d, потрачено %d (в т.ч. перезабивки %d, угли %d, мундштуки %d), доход на визит %.1f" % [count("earned"), count("spent"), count("spent_redo"), count("spent_coals"), count("spent_pieces"), float(count("earned") - count("spent")) / float(maxi(sessions, 1))])
+	lines.append("Мебель: куплено %d (потрачено %d 💰), поставлено %d раз, убрано %d, продано %d (+%d 💰)" % [count("furniture_bought"), count("furniture_spent"), count("furniture_placed"), count("furniture_removed"), count("furniture_sold"), count("furniture_sold_income")])
 	lines.append("Тренды: смен %d, сильных рецептов найдено %d, цель выполнена %d раз" % [count("trend_changes"), count("strong_recipes"), count("goal_done")])
 	lines.append("Кругов гостей (Ден → Макс) завершено: %d" % count("guest_cycles"))
 	var idle_parts: PackedStringArray = []

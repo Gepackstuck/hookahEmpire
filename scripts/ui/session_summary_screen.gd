@@ -45,6 +45,8 @@ static func breakdown_rows(verdict: Dictionary, weights: Dictionary) -> Array[Ar
 		rows.append(["Штраф за жар", "−%.1f" % float(verdict["heat_penalty"]), ""])
 	if float(verdict.get("service_penalty", 0.0)) > 0.0:
 		rows.append(["Штраф за сервис", "−%.1f" % float(verdict["service_penalty"]), ""])
+	if float(verdict.get("furniture_bonus", 0.0)) > 0.0:
+		rows.append(["Обстановка гаража", "+%.1f" % float(verdict["furniture_bonus"]), ""])
 	return rows
 
 

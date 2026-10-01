@@ -1,0 +1,266 @@
+{
+  "_comment": "M9: каталог мебели и правила размещения. Мебель — декор: даёт комфорт и атмосферу, которые суммируются в небольшой бонус к итоговому баллу гостя (не больше bonus.cap). Размеры в клетках сетки (grid_size = [x, y] без поворота). placement: floor — на полу, wall — на стене (y = 0 или x = 0). flat — плоский предмет (ковёр): под ним можно ставить другую мебель, он не блокирует проход. surface_height — высота верха, на который можно ставить предметы с surface_ok.",
+  "bonus": {
+    "per_point": 0.25,
+    "cap": 3.0
+  },
+  "sell_ratio": 0.3,
+  "room": {
+    "_comment": "no_build — только клетки вплотную перед рабочими объектами (стол смешивания, полка, книга рецептов, стол гостя, стол кальянной); остальные проходы защищает required_cells: клетки, до которых всегда должен оставаться проход от двери (рабочие места кальянщика и гостей).",
+    "no_build": [
+      [
+        6,
+        8,
+        4,
+        1
+      ],
+      [
+        5,
+        1,
+        5,
+        1
+      ],
+      [
+        1,
+        1,
+        2,
+        1
+      ],
+      [
+        13,
+        12,
+        2,
+        1
+      ],
+      [
+        14,
+        8,
+        3,
+        1
+      ]
+    ],
+    "required_cells": [
+      [
+        1,
+        7
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        10,
+        12
+      ],
+      [
+        13,
+        12
+      ],
+      [
+        15,
+        8
+      ],
+      [
+        12,
+        10
+      ],
+      [
+        7,
+        1
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        5,
+        7
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        12,
+        1
+      ]
+    ]
+  },
+  "items": [
+    {
+      "id": "small_table",
+      "icon": "🟫",
+      "name": "Малый стол",
+      "price": 120,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "table",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 1,
+      "atmosphere": 1,
+      "visual": {
+        "type": "table",
+        "color": "#a57a4f",
+        "height": 20
+      },
+      "surface_height": 20
+    },
+    {
+      "id": "chair",
+      "icon": "🪑",
+      "name": "Стул",
+      "price": 40,
+      "grid_size": [
+        1,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "seat",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 1,
+      "atmosphere": 0,
+      "visual": {
+        "type": "chair",
+        "color": "#7a4f35"
+      }
+    },
+    {
+      "id": "couch",
+      "icon": "🛋️",
+      "name": "Диван",
+      "price": 400,
+      "grid_size": [
+        3,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "seat",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 3,
+      "atmosphere": 1,
+      "visual": {
+        "type": "couch",
+        "color": "#5b6fa8"
+      }
+    },
+    {
+      "id": "wall_picture",
+      "icon": "🖼️",
+      "name": "Картина",
+      "price": 60,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "decor",
+      "placement": "wall",
+      "blocks": false,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "wall_picture",
+        "color": "#4a3324"
+      }
+    },
+    {
+      "id": "lamp",
+      "icon": "💡",
+      "name": "Торшер",
+      "price": 90,
+      "grid_size": [
+        1,
+        1
+      ],
+      "rotation_allowed": false,
+      "category": "light",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 1,
+      "atmosphere": 2,
+      "visual": {
+        "type": "lamp",
+        "color": "#ffd98a"
+      }
+    },
+    {
+      "id": "plant",
+      "icon": "🪴",
+      "name": "Растение",
+      "price": 70,
+      "grid_size": [
+        1,
+        1
+      ],
+      "rotation_allowed": false,
+      "category": "decor",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 0,
+      "atmosphere": 2,
+      "visual": {
+        "type": "emoji",
+        "text": "🪴",
+        "size": 46
+      },
+      "surface_ok": true
+    },
+    {
+      "id": "rug",
+      "icon": "🟥",
+      "name": "Ковёр",
+      "price": 150,
+      "grid_size": [
+        3,
+        2
+      ],
+      "rotation_allowed": true,
+      "category": "rug",
+      "placement": "floor",
+      "flat": true,
+      "blocks": false,
+      "comfort": 1,
+      "atmosphere": 2,
+      "visual": {
+        "type": "rug",
+        "color": "#a8453d"
+      }
+    },
+    {
+      "id": "small_shelf",
+      "icon": "🗄️",
+      "name": "Малая полка",
+      "price": 200,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "storage",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 1,
+      "atmosphere": 1,
+      "visual": {
+        "type": "bookcase",
+        "color": "#7a5b3a",
+        "height": 64
+      },
+      "surface_height": 64
+    }
+  ]
+}

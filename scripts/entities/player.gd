@@ -32,6 +32,8 @@ var _head: HeadLabels
 var _stand_button: PanelContainer
 var _zoom_tween: Tween = null
 var _camera_following := true
+var _free_camera := false
+var _free_saved: Dictionary = {}
 var _auto_walker := PathWalker.new()
 var _auto_walking: bool = false
 
@@ -222,6 +224,55 @@ func setup(grid: GarageGrid, spawn: Vector2) -> void:
 	grid_position = spawn
 	position = IsoProjection.grid_to_screen(grid_position)
 	reset_emoji()
+
+
+## Свободная камера (режим расстановки мебели): камера отцепляется от игрока, её можно двигать pan_camera().
+func begin_free_camera() -> void:
+	if _free_camera:
+		return
+	_free_camera = true
+	_free_saved = {
+		"top": _camera.top_level, "position": _camera.position, "global": _camera.global_position,
+		"offset": _camera.offset, "smoothing": _camera.position_smoothing_enabled}
+	var center := _camera.get_screen_center_position()
+	# Сглаживание зависит от времени игры, а в режиме мебели оно почти стоит, поэтому выключаем его.
+	_camera.position_smoothing_enabled = false
+	_camera.top_level = true
+	_camera.offset = Vector2.ZERO
+	_camera.global_position = center
+
+
+## Сдвиг свободной камеры на screen_delta пикселей экрана (содержимое «едет» за мышью).
+func pan_camera(screen_delta: Vector2) -> void:
+	if not _free_camera:
+		return
+	var target := _camera.global_position - screen_delta / _camera.zoom
+	# Камера не показывает область за limit_*, поэтому центр держим там, где вид целиком внутри лимитов
+	# (иначе позиция «уезжает» дальше видимого края и назад приходится возвращаться тем же путём).
+	var half_view := get_viewport_rect().size / _camera.zoom * 0.5
+	target.x = _clamp_center(target.x, float(_camera.limit_left) + half_view.x, float(_camera.limit_right) - half_view.x)
+	target.y = _clamp_center(target.y, float(_camera.limit_top) + half_view.y, float(_camera.limit_bottom) - half_view.y)
+	_camera.global_position = target
+
+
+static func _clamp_center(value: float, low: float, high: float) -> float:
+	if low > high:
+		return (low + high) * 0.5
+	return clampf(value, low, high)
+
+
+func end_free_camera() -> void:
+	if not _free_camera:
+		return
+	_free_camera = false
+	_camera.top_level = bool(_free_saved["top"])
+	if _camera.top_level:
+		_camera.global_position = _free_saved["global"]
+	else:
+		_camera.position = _free_saved["position"]
+	_camera.offset = _free_saved["offset"]
+	_camera.position_smoothing_enabled = bool(_free_saved["smoothing"])
+	_camera.reset_smoothing()
 
 
 func set_camera_limits(bounds: Rect2i) -> void:
