@@ -140,5 +140,17 @@
       "hint_ok": "в самый раз"
     }
   ],
-  "serve_weak_below": 60
+  "serve_weak_below": 60,
+  "manual": {
+    "_comment": "Ручное приготовление (M5): как действия игрока переводятся в уровни тех же параметров (0..2). Ожидаемая длина шкал и числа — в секундах/штуках.",
+    "mix_weight": 0.15,
+    "portions": 4,
+    "fill_seconds": 2.5,
+    "light_seconds_per_level": 1.25,
+    "light_burn_seconds": 3.6,
+    "max_coals": 4,
+    "coal_ring": 0.5,
+    "holes_min": 6,
+    "holes_max": 10, "tolerance_factor": 0.6, "tolerance_overrides": {"packing": 0.35, "foil": 0.35}, "foil_seconds": 3.0, "heat_rate": 0.5, "penalty_factor": 1.4, "coil_warmup_seconds": 2.5, "coil_cooldown_seconds": 8.0, "cool_rate": 0.12
+  }
 }

@@ -5,6 +5,8 @@ extends Control
 
 signal closed
 signal prepared(result: Dictionary)
+## Игрок выбрал ручное приготовление (мини-игру) для рецепта.
+signal manual_requested(recipe_id: String)
 
 const OK_COLOR := Color(0.6, 0.9, 0.6, 1)
 const WARN_COLOR := Color(1.0, 0.75, 0.4, 1)
@@ -108,11 +110,21 @@ func _build() -> void:
 	for entry in _service.config.parameters:
 		_form.add_child(_make_parameter_row(entry))
 
+	var prepare_row := HBoxContainer.new()
+	prepare_row.add_theme_constant_override("separation", 14)
+	_form.add_child(prepare_row)
 	var prepare_button := Button.new()
-	prepare_button.text = "🔥 Приготовить"
+	prepare_button.text = "🎚 Приготовить переключателями"
 	prepare_button.custom_minimum_size = Vector2(0, 52)
+	prepare_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prepare_button.pressed.connect(_on_prepare_pressed)
-	_form.add_child(prepare_button)
+	prepare_row.add_child(prepare_button)
+	var manual_button := Button.new()
+	manual_button.text = "✋ Приготовить вручную"
+	manual_button.custom_minimum_size = Vector2(0, 52)
+	manual_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	manual_button.pressed.connect(_on_manual_pressed)
+	prepare_row.add_child(manual_button)
 
 	_result_box = VBoxContainer.new()
 	_result_box.add_theme_constant_override("separation", 10)
@@ -209,6 +221,28 @@ func _sync_options() -> void:
 
 func _on_option_pressed(parameter_id: String, option_id: String) -> void:
 	_choices[parameter_id] = option_id
+
+
+func _on_manual_pressed() -> void:
+	if not _selected_recipe_id.is_empty():
+		manual_requested.emit(_selected_recipe_id)
+
+
+## Окно временно скрыто, пока открыта мини-игра (не считается закрытием).
+func suspend() -> void:
+	visible = false
+
+
+func resume() -> void:
+	visible = true
+
+
+## Мини-игра подала кальян (результат уже записан): завершаем так же, как подача в быстром режиме.
+func complete_with(result: Dictionary) -> void:
+	_pending_result = {}
+	visible = true
+	prepared.emit(result)
+	close()
 
 
 func _on_prepare_pressed() -> void:

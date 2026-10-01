@@ -15,8 +15,13 @@ const PLAYER_SCENE := preload("res://scenes/characters/Player.tscn")
 const FRIEND_SCENE := preload("res://scenes/characters/Friend.tscn")
 const DOOR_OBJECT_ID := "door_main"
 const HOOKAH_OBJECT_ID := "hookah_test"
-const HOOKAH_CARRY_TEXTURE := "res://art/furniture/hookah_test.png"
+const HOOKAH_PREP_OBJECT_ID := "hookah_prep"
+const SHELF_OBJECT_ID := "shelf_hookah"
+## Где шланг лежит на столе для кальянов (от основания кальяна): в свободном заднем правом углу, между предметами.
+const PREP_HOSE_START := Vector2(10.0, 0.0)
+const PREP_HOSE_END := Vector2(40.0, 12.0)
 const FRIEND_TALK_PROMPT := "Поговорить"
+const SIT_CAMERA_ZOOM := 3.0
 const FRIEND_TALK_RADIUS := 1.4
 
 var _grid: GarageGrid = null
@@ -29,6 +34,23 @@ var _serve_cell := Vector2i(-1, -1)
 var _prep_cell := Vector2i(-1, -1)
 var _seat_cell := Vector2i(-1, -1)
 var _sitting_busy := false
+## Цвет кальяна, который взяли с полки (его же несут, ставят на стол и подают гостю).
+var _hookah_color := Color("#22b8ff")
+## Шланг: концы плавно едут к целевым точкам (колбэки возвращают координаты Entities).
+var _hose: HoseLine = null
+var _hose_start_fn := Callable()
+var _hose_end_fn := Callable()
+var _hose_aim_fn := Callable()
+var _hose_cover_fn := Callable()
+var _hose_cover_id := ""
+## Начало шланга плавно едет (только когда мастер тянет его к клапану); иначе приклеено к кальяну.
+var _hose_start_smooth := false
+## Вид ручки шланга текущего кальяна (случайный при выборе кальяна).
+var _handle_style := 0
+var _hose_holder: Node2D = null
+var _hose_at_guest := false
+var _warming_up := false
+var _guest_piece := Color("#e29a2e")
 ## Сообщение о вкусе кальяна: показывается после нескольких затяжек игрока.
 var _pending_smoke_message := ""
 var _puffs_until_message := 0
@@ -56,12 +78,18 @@ func _ready() -> void:
 	_prep_cell = layout.hookah_prep_cell
 	_seat_cell = layout.player_seat_cell
 	_build_objects(layout)
+	# Стул игрока непроходим, пока на нём не сидят (иначе сквозь него можно ходить).
+	if _seat_cell.x >= 0:
+		_grid.set_blocked_rect(Rect2i(_seat_cell, Vector2i.ONE), true)
 
 	_player = PLAYER_SCENE.instantiate() as Player
 	_entities.add_child(_player)
 	_player.setup(_grid, layout.player_spawn)
 	_player.inhale_started.connect(_on_inhale)
 	_player.inhale_started.connect(_on_player_inhale)
+	_player.inhale_started.connect(func(_duration: float) -> void: _hose_take(_player))
+	_hose = HoseLine.new()
+	add_child(_hose)
 	_player.stood_up.connect(_on_player_stood_up)
 	_player.set_camera_limits(GarageBackdrop.screen_bounds(layout.size))
 
@@ -83,11 +111,16 @@ func _process(delta: float) -> void:
 	if _player == null:
 		return
 	_try_apply_pending_blocks()
+	_update_hose(delta)
 	_interactions.update_focus(_player.grid_position)
 	_update_marker(delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _player != null and _player.seated and not _sitting_busy and not _input_locked and event.is_action_pressed("interact"):
+		_player.stand_up()
+		get_viewport().set_input_as_handled()
+		return
 	if _player != null and not _input_locked and event.is_action_pressed("interact"):
 		if _interactions.interact():
 			get_viewport().set_input_as_handled()
@@ -120,7 +153,12 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	friend.setup(str(guest["id"]), str(guest["emoji"]), entry_position, str(guest.get("sprite_faces", "right")) == "right")
 	_objects[friend.guest_id] = friend
 	friend.inhale_started.connect(_on_inhale)
+	# Игрок и гость не тянут кальян одновременно: между их затяжками есть пауза.
+	friend.smoke_emitter().partner = _player.smoke_emitter()
+	_player.smoke_emitter().partner = friend.smoke_emitter()
 	friend.inhale_started.connect(func(_duration: float) -> void: friend_inhaled.emit(friend.guest_id))
+	friend.inhale_started.connect(func(_duration: float) -> void: _hose_take(friend))
+	_guest_piece = friend.piece_color()
 	friend.arrived.connect(_on_friend_arrived.bind(friend, guest, stand_cell, dialogue_id, seat))
 	GameLog.info("garage", "%s заходит в гараж" % str(guest["name"]))
 	_enter_through_door(friend, path)
@@ -175,31 +213,271 @@ func is_object_visible(object_id: String) -> bool:
 	return node is CanvasItem and (node as CanvasItem).visible
 
 
-## Игрок несёт кальян к столу гостя: идёт к точке подачи с кальяном в руках, ставит его на стол.
+## Игрок идёт к полке, берёт случайный кальян (слот пустеет), несёт к столу для кальянов и ставит его.
+## Корутина: завершается, когда кальян стоит на столе. Ввод на время переноса блокируется.
+func fetch_random_hookah() -> void:
+	if _player == null or _grid == null:
+		return
+	var was_locked := _input_locked
+	set_input_locked(true)
+	reset_hose()
+	_handle_style = randi_range(0, HoseLine.HANDLE_STYLES - 1)
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	var color := Color.html(HookahArt.PALETTE.pick_random())
+	if shelf is GarageObject and (shelf as GarageObject).hookah_slot_count() > 0:
+		var rack := shelf as GarageObject
+		var free := rack.free_hookah_slots()
+		if free.is_empty():
+			rack.restock_hookahs()
+			free = rack.free_hookah_slots()
+		var slot: int = free.pick_random()
+		await _walk_to(rack.shelf_front_cell(slot))
+		await get_tree().create_timer(0.3).timeout
+		color = rack.hookah_slot_color(slot)
+		rack.take_hookah(slot)
+		GameLog.info("garage", "Кальян взят с полки: слот %d, цвет %s" % [slot, color.to_html(false)])
+	_hookah_color = color
+	_player.set_carrying_hookah(color)
+	await get_tree().create_timer(0.2).timeout
+	await _walk_to(_prep_cell)
+	_player.set_carrying(null)
+	await _place_hookah(HOOKAH_PREP_OBJECT_ID)
+	set_input_locked(was_locked)
+
+
+## Цвет текущего кальяна (взятого с полки).
+func hookah_color() -> Color:
+	return _hookah_color
+
+
+## Полка заново заставляется кальянами (отладка/сброс).
+func restock_shelf() -> void:
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	if shelf is GarageObject:
+		(shelf as GarageObject).restock_hookahs()
+
+
+## Игрок несёт кальян к столу гостя: вставляет шланг в кальян, берёт кальян и конец шланга,
+## идёт к точке подачи, ставит кальян на стол гостя и раскуривает.
 ## Корутина: завершается, когда кальян стоит на столе. Ввод на время переноса блокируется.
 func carry_hookah_to_guest_table() -> void:
-	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
-	if _player == null or _grid == null or not (hookah is GarageObject):
+	if _player == null or _grid == null or not (_objects.get(HOOKAH_OBJECT_ID) is GarageObject):
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
-	(hookah as GarageObject).visible = false
+	await _insert_hose()
+	hide_object(HOOKAH_PREP_OBJECT_ID)
+	_hose_carried()
 	await _walk_carrying(_serve_cell)
-	await (hookah as GarageObject).drop_in()
+	await _place_hookah(HOOKAH_OBJECT_ID)
+	_guest_takes_mouthpiece()
+	_warming_up = true
 	await _warm_up_puffs()
+	_warming_up = false
+	_hose_release_if_idle()
 	set_input_locked(was_locked)
 
 
-## Игрок забирает кальян со стола гостя и несёт к столу для кальянов (перезабивка).
+## Игрок забирает кальян со стола гостя вместе со шлангом и несёт к столу для кальянов (перезабивка).
 func carry_hookah_to_prep_table() -> void:
-	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
-	if _player == null or _grid == null or not (hookah is GarageObject):
+	if _player == null or _grid == null or not (_objects.get(HOOKAH_PREP_OBJECT_ID) is GarageObject):
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
-	(hookah as GarageObject).visible = false
+	hide_object(HOOKAH_OBJECT_ID)
+	_hose_holder = null
+	_hose_at_guest = false
+	_hose.piece = _guest_piece
+	_player.set_piece_hidden(false)
+	_hose_carried()
 	await _walk_carrying(_prep_cell)
+	await _place_hookah(HOOKAH_PREP_OBJECT_ID)
 	set_input_locked(was_locked)
+
+
+## Ставит кальян нужного цвета на стол (объект появляется с «падением»); шланг ложится рядом
+## (на столе для кальянов) или остаётся в руке игрока (на столе гостя).
+func _place_hookah(object_id: String) -> void:
+	var hookah: Variant = _objects.get(object_id)
+	if not (hookah is GarageObject):
+		return
+	# Кальянщик ставит кальян лицом к столу.
+	_player.face_toward((hookah as GarageObject).position.x)
+	(hookah as GarageObject).set_hookah_color(_hookah_color)
+	_hose.color = _hookah_color
+	_hose.handle_style = _handle_style
+	if object_id == HOOKAH_PREP_OBJECT_ID:
+		_hose.piece = Color(0, 0, 0, 0)
+		_hose_loose_on_prep(not _hose.shown)
+	else:
+		_hose_at_guest = true
+		_hose_held_by(_player)
+	await (hookah as GarageObject).drop_in()
+
+
+# --- Шланг ---------------------------------------------------------------------------------
+
+func _object_base(object_id: String) -> Vector2:
+	var node: Variant = _objects.get(object_id)
+	return (node as GarageObject).hookah_base_position() if node is GarageObject else Vector2.ZERO
+
+
+func _object_valve(object_id: String) -> Vector2:
+	var node: Variant = _objects.get(object_id)
+	return (node as GarageObject).hookah_valve_position() if node is GarageObject else Vector2.ZERO
+
+
+func _hose_use(start_fn: Callable, end_fn: Callable, aim_fn: Callable, lying: bool, snap: bool = false) -> void:
+	_hose_start_fn = start_fn
+	_hose_end_fn = end_fn
+	_hose_aim_fn = aim_fn
+	_hose_cover_fn = Callable()
+	_hose_cover_id = ""
+	_hose_start_smooth = false
+	_hose.lying = lying
+	_hose.flat = false
+	if snap:
+		_hose.start = start_fn.call()
+		_hose.end = end_fn.call()
+	_hose.show_hose(true)
+
+
+func _update_hose(delta: float) -> void:
+	if _hose == null or not _hose.shown or not _hose_start_fn.is_valid():
+		return
+	var follow := 1.0 - exp(-14.0 * delta)
+	_hose.start = _hose.start.lerp(_hose_start_fn.call(), follow) if _hose_start_smooth else _hose_start_fn.call()
+	_hose.end = _hose.end.lerp(_hose_end_fn.call(), follow)
+	_hose.cover_enabled = _hose_cover_fn.is_valid()
+	if _hose.cover_enabled:
+		_hose.cover_base = _hose_cover_fn.call()
+		_hose.cover_color = _hookah_color
+		var cover_node: Variant = _objects.get(_hose_cover_id)
+		_hose.cover_squash = (cover_node as GarageObject).hookah_squash() if cover_node is GarageObject else 0.0
+	if _hose_aim_fn.is_valid():
+		var aim: Vector2 = _hose_aim_fn.call()
+		if aim != Vector2.ZERO:
+			_hose.piece_dir = aim
+	_hose.queue_redraw()
+
+
+## Мундштук лежит перед лицом горизонтально и смотрит кончиком в рот (назад по взгляду держащего) — никуда не поворачивается.
+func _aim_to_mouth(holder: Node2D) -> Vector2:
+	return Vector2(-float(holder.call("facing_sign")), -0.47).normalized()
+
+
+## Конец шланга (основание ручки) у держащего: рука хватает ручку на расстоянии GRIP_OFFSET от шланга,
+## при затяжке рука идёт ко рту и кончик мундштука касается губ.
+func _holder_end(holder: Node2D) -> Vector2:
+	var hand: Vector2 = holder.call("hand_position")
+	return hand - _aim_to_mouth(holder) * HoseLine.GRIP_OFFSET
+
+
+## Шланг лежит петлёй рядом с кальяном на столе для кальянов (оба конца свободны).
+func _hose_loose_on_prep(snap: bool) -> void:
+	var base := _object_base(HOOKAH_PREP_OBJECT_ID)
+	_hose_use(func() -> Vector2: return base + PREP_HOSE_START, func() -> Vector2: return base + PREP_HOSE_END,
+		func() -> Vector2: return Vector2(-0.99, 0.1), true, snap)
+	_hose.flat = true
+
+
+## Кальян в руках: клапан едет с кальяном, свободный конец шланга — в руке игрока.
+func _hose_carried() -> void:
+	_hose_use(func() -> Vector2: return _player.carried_valve_position(), func() -> Vector2: return _holder_end(_player),
+		func() -> Vector2: return _aim_to_mouth(_player), false)
+	_hose_cover_fn = func() -> Vector2: return _player.carried_base_position()
+	_hose_cover_id = "carried"
+
+
+## Шланг подключён к кальяну на столе гостя, конец у holder (мундштук его собственный).
+func _hose_held_by(holder: Node2D) -> void:
+	if not _hose_at_guest or _hose_holder == holder:
+		return
+	_hose_holder = holder
+	_set_holders_hold(holder)
+	var master := holder == _player
+	_hose.piece = _player.piece_color() if master else Color(holder.call("piece_color"))
+	_player.set_piece_hidden(master)
+	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_OBJECT_ID), func() -> Vector2: return _holder_end(holder),
+		func() -> Vector2: return _aim_to_mouth(holder), false)
+	_hose_cover_fn = func() -> Vector2: return _object_base(HOOKAH_OBJECT_ID)
+	_hose_cover_id = HOOKAH_OBJECT_ID
+
+
+## Рука с ручкой шланга вперёд только у того, кто держит шланг.
+func _set_holders_hold(holder: Node2D) -> void:
+	_player.set_holding(holder == _player)
+	for node in _objects.values():
+		if node is Friend:
+			(node as Friend).set_holding(holder == node)
+
+
+## Кто-то начал затяжку: берёт шланг в руку.
+func _hose_take(holder: Node2D) -> void:
+	if _hose_at_guest and is_object_visible(HOOKAH_OBJECT_ID):
+		_hose_held_by(holder)
+
+
+## Никто не курит: шланг с мундштуком гостя ложится на стол, мундштук мастера возвращается на шею.
+func _hose_release_if_idle() -> void:
+	if _hose == null or not _hose_at_guest or _warming_up or _player.is_smoking():
+		return
+	for node in _objects.values():
+		if node is Friend and (node as Friend).is_smoking():
+			return
+	_hose_holder = null
+	_set_holders_hold(null)
+	_hose.piece = _guest_piece
+	_player.set_piece_hidden(false)
+	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_OBJECT_ID), func() -> Vector2: return _object_base(HOOKAH_OBJECT_ID) + Vector2(-17, 3),
+		func() -> Vector2: return Vector2(-0.9, 0.3), true)
+
+
+## Мастер вставляет шланг в кальян: берёт конец со стола, подключает к клапану, надевает свой мундштук с шеи.
+func _insert_hose() -> void:
+	if _hose == null or not _hose.shown:
+		return
+	var base := _object_base(HOOKAH_PREP_OBJECT_ID)
+	_player.face_toward(base.x)
+	_player.set_holding(true)
+	_hose_use(func() -> Vector2: return base + PREP_HOSE_START, func() -> Vector2: return _holder_end(_player),
+		func() -> Vector2: return _aim_to_mouth(_player), true)
+	_hose.flat = true
+	await get_tree().create_timer(0.6).timeout
+	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_PREP_OBJECT_ID), func() -> Vector2: return _holder_end(_player),
+		func() -> Vector2: return _aim_to_mouth(_player), false)
+	_hose_cover_fn = func() -> Vector2: return _object_base(HOOKAH_PREP_OBJECT_ID)
+	_hose_cover_id = HOOKAH_PREP_OBJECT_ID
+	_hose_start_smooth = true
+	await get_tree().create_timer(0.7).timeout
+	_hose.piece = _player.piece_color()
+	_player.set_piece_hidden(true)
+	await get_tree().create_timer(0.4).timeout
+	_player.set_holding(false)
+
+
+## Сброс шланга (отладка): кальяна нет — шланга тоже.
+func reset_hose() -> void:
+	if _hose == null:
+		return
+	_hose.show_hose(false)
+	_hose_holder = null
+	_hose_at_guest = false
+	_warming_up = false
+	_player.set_piece_hidden(false)
+	_player.set_holding(false)
+
+
+## Гость берёт из коробочки случайный мундштук (он пропадает из коробки) — пока мастер раскуривает кальян.
+func _guest_takes_mouthpiece() -> void:
+	var table: Variant = _objects.get("table_guest")
+	if table is GarageObject:
+		_guest_piece = (table as GarageObject).take_box_piece()
+	for node in _objects.values():
+		if node is Friend:
+			(node as Friend).set_piece_color(_guest_piece)
+	if _hose_at_guest and _hose_holder != null and _hose_holder != _player:
+		_hose.piece = _guest_piece
 
 
 ## Небольшая раскурка перед подачей: 2–5 коротких тяжек.
@@ -217,16 +495,20 @@ func _on_inhale(duration: float) -> void:
 		(hookah as GarageObject).squash(duration)
 
 
-func _walk_carrying(target_cell: Vector2i) -> void:
+func _walk_to(target_cell: Vector2i) -> void:
 	if target_cell.x < 0:
 		return
-	var start_cell := Vector2i(_player.grid_position.floor())
-	var path := _grid.find_path(start_cell, target_cell)
-	if ResourceLoader.exists(HOOKAH_CARRY_TEXTURE):
-		_player.set_carrying(load(HOOKAH_CARRY_TEXTURE))
+	var path := _grid.find_path(Vector2i(_player.grid_position.floor()), target_cell)
 	_player.walk_path(path)
 	await _player.auto_walk_finished
+
+
+func _walk_carrying(target_cell: Vector2i) -> void:
+	_player.set_carrying_hookah(_hookah_color)
+	_player.set_holding(true)
+	await _walk_to(target_cell)
 	_player.set_carrying(null)
+	_player.set_holding(false)
 
 
 ## id первого друга, который уже дошёл до своей точки ("" — никого нет).
@@ -249,6 +531,7 @@ func set_friend_smoking(guest_id: String, on: bool, mood_emoji: String = "") -> 
 	var node: Variant = _objects.get(guest_id)
 	if node is Friend:
 		(node as Friend).set_smoking(on, mood_emoji)
+		_hose_release_if_idle()
 
 
 func _update_marker(delta: float) -> void:
@@ -364,16 +647,39 @@ func _sit_and_smoke(source_id: String, message: String) -> void:
 		return
 	_sitting_busy = true
 	_emoji_source_id = source_id
+	if _seat_cell.x >= 0:
+		_grid.set_blocked_rect(Rect2i(_seat_cell, Vector2i.ONE), false)
 	var path := _grid.find_path(Vector2i(_player.grid_position.floor()), _seat_cell)
 	if not path.is_empty():
 		_player.walk_path(path)
 		await _player.auto_walk_finished
 	_player.sit_down()
+	_player.focus_camera(SIT_CAMERA_ZOOM, _sit_focus_offset())
 	_prompt.hide_prompt()
 	_player.set_smoking(true)
 	_sitting_busy = false
 	_pending_smoke_message = message
 	_puffs_until_message = randi_range(2, 5)
+
+
+## Камера смещается к середине между игроком и гостем (чтобы оба были в кадре).
+func _sit_focus_offset() -> Vector2:
+	for node in _objects.values():
+		if node is Friend:
+			return ((node as Friend).position - _player.position) * 0.5 + Vector2(0, -14)
+	return Vector2.ZERO
+
+
+## Гость делает count затяжек (корутина; ждёт сигналов затяжек именно этого гостя).
+func wait_for_friend_puffs(guest_id: String, count: int) -> void:
+	if not (_objects.get(guest_id) is Friend):
+		return
+	var remaining := count
+	while remaining > 0:
+		var who: String = await friend_inhaled
+		if who == guest_id:
+			remaining -= 1
+	await get_tree().create_timer(1.1).timeout
 
 
 func _on_player_inhale(_duration: float) -> void:
@@ -386,7 +692,11 @@ func _on_player_inhale(_duration: float) -> void:
 
 
 func _on_player_stood_up() -> void:
+	# Стул снова становится непроходимым, как только игрок из него вышел.
+	if _seat_cell.x >= 0:
+		_pending_blocks.append(Rect2i(_seat_cell, Vector2i.ONE))
 	_pending_smoke_message = ""
 	_on_focus_changed(_interactions.focus)
 	_emoji_source_id = ""
 	_player.set_smoking(false)
+	_hose_release_if_idle()

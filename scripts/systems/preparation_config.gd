@@ -13,6 +13,37 @@ var ok_tolerance: float = 0.5
 var serve_weak_below: float = 60.0
 ## Порядок как в файле. Элемент: id, name, weight, base, weights, options [{id, name}], hint_low/high/ok.
 var parameters: Array[Dictionary] = []
+## Ручной режим (M5): вес подоценки состава и числа, по которым действия переводятся в уровни.
+var manual_mix_weight: float = 0.15
+var manual_portions: int = 4
+var manual_fill_seconds: float = 2.5
+var manual_light_seconds_per_level: float = 1.25
+var manual_light_burn_seconds: float = 3.6
+## Допустимое число отверстий: min даёт уровень «мало» (0), max — «много» (2).
+var manual_holes_min: int = 4
+var manual_holes_max: int = 10
+var manual_max_coals: int = 4
+## Идеальное расстояние угля от центра чаши (доля радиуса).
+var manual_coal_ring: float = 0.5
+## Ручной режим строже быстрого: допуск (доля ok_tolerance) и множитель штрафа за отклонение.
+var manual_tolerance_factor: float = 0.6
+var manual_penalty_factor: float = 1.4
+## Индивидуальные множители допуска для параметров (у набивки и фольги зона уже).
+var manual_tolerance_overrides: Dictionary = {}
+## Сколько секунд удержания нужно, чтобы натянуть фольгу до конца.
+var manual_foil_seconds: float = 3.0
+## Скорость нагрева углей на горячей плитке (секунд «нагрева» в секунду).
+var manual_heat_rate: float = 0.5
+## Плитка: сколько секунд разогревается спираль и остывает после выключения.
+var manual_coil_warmup_seconds: float = 2.5
+var manual_coil_cooldown_seconds: float = 8.0
+## Остывание углей на плитке без нагрева: секунд «нагрева» в секунду.
+var manual_cool_rate: float = 0.12
+
+
+## Допуск ручного режима для параметра (в уровнях).
+func manual_tolerance(parameter_id: String) -> float:
+	return ok_tolerance * float(manual_tolerance_overrides.get(parameter_id, manual_tolerance_factor))
 
 
 static func load_default() -> PreparationConfig:
@@ -76,6 +107,7 @@ func _parse(data: Dictionary) -> void:
 	serve_weak_below = float(data.get("serve_weak_below", serve_weak_below))
 	if penalty_per_level <= 0.0:
 		errors.append("preparation: penalty_per_level должен быть > 0")
+	_parse_manual(data.get("manual", {}))
 	var raw: Variant = data.get("parameters")
 	if not (raw is Array) or raw.is_empty():
 		errors.append("preparation: parameters должен быть непустым массивом")
@@ -113,6 +145,35 @@ func _parse(data: Dictionary) -> void:
 		})
 	if weight_sum <= 0.0:
 		errors.append("preparation: сумма весов параметров должна быть > 0")
+
+
+func _parse_manual(raw: Variant) -> void:
+	if not (raw is Dictionary):
+		errors.append("preparation: manual должен быть объектом")
+		return
+	manual_mix_weight = float(raw.get("mix_weight", manual_mix_weight))
+	manual_portions = int(raw.get("portions", manual_portions))
+	manual_fill_seconds = float(raw.get("fill_seconds", manual_fill_seconds))
+	manual_light_seconds_per_level = float(raw.get("light_seconds_per_level", manual_light_seconds_per_level))
+	manual_light_burn_seconds = float(raw.get("light_burn_seconds", manual_light_burn_seconds))
+	manual_holes_min = int(raw.get("holes_min", manual_holes_min))
+	manual_holes_max = int(raw.get("holes_max", manual_holes_max))
+	manual_max_coals = int(raw.get("max_coals", manual_max_coals))
+	manual_coal_ring = float(raw.get("coal_ring", manual_coal_ring))
+	manual_tolerance_factor = float(raw.get("tolerance_factor", manual_tolerance_factor))
+	manual_penalty_factor = float(raw.get("penalty_factor", manual_penalty_factor))
+	var overrides: Variant = raw.get("tolerance_overrides", {})
+	if overrides is Dictionary:
+		manual_tolerance_overrides = overrides
+	manual_foil_seconds = float(raw.get("foil_seconds", manual_foil_seconds))
+	manual_heat_rate = float(raw.get("heat_rate", manual_heat_rate))
+	manual_coil_warmup_seconds = float(raw.get("coil_warmup_seconds", manual_coil_warmup_seconds))
+	manual_coil_cooldown_seconds = float(raw.get("coil_cooldown_seconds", manual_coil_cooldown_seconds))
+	manual_cool_rate = float(raw.get("cool_rate", manual_cool_rate))
+	if manual_mix_weight < 0.0 or manual_portions < 1 or manual_fill_seconds <= 0.0 or manual_light_seconds_per_level <= 0.0 \
+			or manual_holes_min < 1 or manual_holes_max <= manual_holes_min or manual_max_coals < 1 \
+			or manual_foil_seconds <= 0.0 or manual_heat_rate <= 0.0 or manual_tolerance_factor <= 0.0 or manual_penalty_factor <= 0.0 or manual_coil_warmup_seconds <= 0.0 or manual_coil_cooldown_seconds <= 0.0 or manual_cool_rate < 0.0:
+		errors.append("preparation: manual содержит некорректные числа")
 
 
 func _parse_options(raw: Variant, label: String) -> Array[Dictionary]:

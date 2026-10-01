@@ -5,6 +5,10 @@ extends Node2D
 
 const BODY_SCALE := 0.9
 const WALK_FREQUENCY := 11.0
+## На сколько (в локальных единицах фигурки) от рта вперёд берётся рука, когда тянет шланг: ручка с мундштуком между рукой и ртом.
+const GRIP_REACH := 11.3
+## И на сколько ниже рта берётся хват (рука не поднимается к лицу, мундштук идёт ко рту снизу).
+const GRIP_DROP := 5.3
 
 const POSE_STAND := "stand"
 const POSE_SIT := "sit"
@@ -19,6 +23,12 @@ var jacket := Color(0, 0, 0, 0)
 var tie := Color(0, 0, 0, 0)
 ## В покое поднять руку вверх (танцор).
 var idle_dance := false
+## Мундштук на шнурке на шее (кальянный мастер): цвет смолы; piece_hidden — мундштук сейчас вставлен в шланг.
+var lanyard := false
+var piece_color := Color("#e29a2e")
+var piece_hidden := false
+## Держит перед собой конец шланга (рука вперёд).
+var holding := false
 
 var pose: String = POSE_STAND
 var moving: bool = false
@@ -28,6 +38,7 @@ var facing_right: bool = true
 var _phase: float = 0.0
 var _time: float = 0.0
 var _hand_t: float = 0.0
+var _last_hand := Vector2.ZERO
 
 
 ## Готовые образы: "denis" и "player".
@@ -42,6 +53,8 @@ static func make(style: String) -> CharacterFigure:
 			figure.tie = Color("#d6403f")
 			figure.pants = Color("#1e1e26")
 			figure.shoes = Color("#e9e9e9")
+			figure.lanyard = true
+			figure.piece_color = Color("#2fb36b")
 		_:
 			figure.skin = Color("#f1c27d")
 			figure.hair = Color("#5a3a22")
@@ -61,6 +74,28 @@ func set_facing(right: bool) -> void:
 func mouth_position() -> Vector2:
 	var local := _mouth_local()
 	return position + Vector2(local.x * scale.x, local.y * scale.y)
+
+
+## Насколько рука поднята ко рту (0..1).
+func puff_amount() -> float:
+	return _hand_t
+
+
+## Ближняя рука в координатах родителя (куда ложится шланг).
+func hand_position() -> Vector2:
+	return position + Vector2(_last_hand.x * scale.x, _last_hand.y * scale.y)
+
+
+func _draw_lanyard(shoulder: Vector2) -> void:
+	if not lanyard:
+		return
+	var chest := shoulder + Vector2(3.5, 13.0)
+	var strap := Color("#15151a")
+	draw_line(shoulder + Vector2(-1.0, 0.0), chest, strap, 1.4, true)
+	draw_line(shoulder + Vector2(5.0, 0.0), chest, strap, 1.4, true)
+	draw_circle(chest, 1.3, Color("#cfd4dc"))
+	if not piece_hidden:
+		HookahArt.draw_mouthpiece(self, chest + Vector2(0.0, 1.0), Vector2.DOWN, piece_color, 0.42)
 
 
 func _process(delta: float) -> void:
@@ -85,6 +120,11 @@ func _head_local() -> Vector2:
 
 func _mouth_local() -> Vector2:
 	return _head_local() + Vector2(7.0, 4.5)
+
+
+## Куда идёт рука при затяжке: хват ручки шланга перед лицом.
+func _grip_local() -> Vector2:
+	return _mouth_local() + Vector2(GRIP_REACH, GRIP_DROP)
 
 
 func _limb(a: Vector2, b: Vector2, width: float, color: Color) -> void:
@@ -135,6 +175,7 @@ func _draw_standing() -> void:
 			shoulder + Vector2(3.0, 2.0), shoulder + Vector2(7.0, 4.0),
 			hip + Vector2(5.0, -6.0), hip + Vector2(3.0, -6.0)]), shirt)
 		draw_line(shoulder + Vector2(5.0, 4.0), hip + Vector2(4.0, -8.0), tie, 2.2)
+	_draw_lanyard(shoulder)
 	var head: Vector2 = _head_local()
 	_limb(shoulder + Vector2(0, 1.0), head + Vector2(0, 5.0), 5.0, skin.darkened(0.08))
 	_draw_head(head)
@@ -155,10 +196,13 @@ func _arm(shoulder: Vector2, near: bool) -> void:
 			var wave: float = sin(_time * 4.0)
 			hand = shoulder + Vector2(8.0 + wave * 1.5, -15.0)
 			elbow = shoulder + Vector2(6.0, -5.0)
+		if holding:
+			hand = shoulder + Vector2(10.0, 13.0)
+			elbow = shoulder + Vector2(5.0, 9.5)
 		if _hand_t > 0.0:
-			var mouth: Vector2 = _mouth_local() + Vector2(-2.0, 2.5)
-			hand = hand.lerp(mouth, _hand_t)
+			hand = hand.lerp(_grip_local(), _hand_t)
 			elbow = elbow.lerp(shoulder + Vector2(7.0, 6.0), _hand_t)
+		_last_hand = hand
 	_limb(shoulder, elbow, 5.2, tone)
 	_limb(elbow, hand, 4.8, tone)
 	draw_circle(hand, 2.8, skin if near else skin.darkened(0.2))
@@ -194,6 +238,7 @@ func _draw_seated() -> void:
 	_limb(hip, knee, 7.5, pants)
 	_limb(knee, foot, 6.5, pants)
 	_shoe(foot)
+	_draw_lanyard(shoulder)
 	var head: Vector2 = _head_local()
 	_limb(shoulder + Vector2(0, 1.0), head + Vector2(0, 5.0), 5.0, skin.darkened(0.08))
 	_draw_head(head)
@@ -205,9 +250,14 @@ func _seated_arm(shoulder: Vector2, rest: Vector2, near: bool) -> void:
 	var tone: Color = sleeve if near else sleeve.darkened(0.3)
 	var elbow: Vector2 = shoulder.lerp(rest, 0.5) + Vector2(-3.0, 3.0)
 	var hand: Vector2 = rest
+	if near and holding:
+		hand = shoulder + Vector2(10.0, 13.0)
+		elbow = shoulder + Vector2(5.0, 9.5)
 	if near and _hand_t > 0.0:
-		hand = hand.lerp(_mouth_local() + Vector2(-2.0, 2.5), _hand_t)
+		hand = hand.lerp(_grip_local(), _hand_t)
 		elbow = elbow.lerp(shoulder + Vector2(7.0, 6.0), _hand_t)
+	if near:
+		_last_hand = hand
 	_limb(shoulder, elbow, 5.2, tone)
 	_limb(elbow, hand, 4.8, tone)
 	draw_circle(hand, 2.8, skin if near else skin.darkened(0.2))

@@ -3,8 +3,8 @@ extends RefCounted
 ## Загрузка и валидация data-описания гаража (data/garage/*.json).
 ## Ошибки копятся в errors; is_valid() == false означает, что layout использовать нельзя.
 
-const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door"]
-const PROP_TYPES := ["hookah", "jar", "cup", "coals"]
+const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah"]
+const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box"]
 
 var id: String = ""
 var size: Vector2i = Vector2i.ZERO
@@ -165,6 +165,25 @@ func _parse_object(entry: Variant, index: int, seen_ids: Dictionary) -> Dictiona
 				errors.append("%s: у texture-визуала нет path" % label)
 				return {}
 
+	if str(visual["type"]) == "neon_sign":
+		var lines: Variant = visual.get("lines")
+		if not (lines is Array) or lines.is_empty():
+			errors.append("%s: у neon_sign должен быть непустой массив lines" % label)
+			return {}
+		if visual.has("wall") and not ["left", "right"].has(str(visual["wall"])):
+			errors.append("%s: neon_sign.wall должен быть left или right" % label)
+			return {}
+		for line in lines:
+			if not (line is Dictionary) or str(line.get("text", "")).is_empty() or not Color.html_is_valid(str(line.get("color", "#ffffff"))):
+				errors.append("%s: каждая строка neon_sign — {text, color, size?, blink?}" % label)
+				return {}
+
+	if visual.has("hookah_slots"):
+		var slots_error := _validate_hookah_slots(visual["hookah_slots"])
+		if not slots_error.is_empty():
+			errors.append("%s: visual.hookah_slots: %s" % [label, slots_error])
+			return {}
+
 	if visual.has("props"):
 		var props_error := _validate_props(visual["props"])
 		if not props_error.is_empty():
@@ -219,7 +238,27 @@ func _parse_object(entry: Variant, index: int, seen_ids: Dictionary) -> Dictiona
 
 
 
-## Предметы на поверхности объекта: [{"type": "hookah|jar|cup|coals", "at": [x, y], "color": "#rrggbb"}],
+## Слоты кальянов на полке: {"rows": [{"z": px}], "count": N на ряд, "span": ширина ряда в клетках, "palette": ["#rrggbb"] (необязательно)}.
+func _validate_hookah_slots(raw: Variant) -> String:
+	if not (raw is Dictionary):
+		return "должен быть объектом"
+	var rows: Variant = raw.get("rows")
+	if not (rows is Array) or rows.is_empty():
+		return "rows должен быть непустым массивом {z}"
+	for row in rows:
+		if not (row is Dictionary) or not (row.get("z") is float or row.get("z") is int):
+			return "каждый ряд — {z: число}"
+	if not (raw.get("count") is float or raw.get("count") is int) or int(raw["count"]) < 1:
+		return "count должен быть числом >= 1"
+	if not (raw.get("span") is float or raw.get("span") is int) or float(raw["span"]) <= 0.0:
+		return "span должен быть положительным числом"
+	for color in raw.get("palette", []):
+		if not Color.html_is_valid(str(color)):
+			return "некорректный цвет в palette"
+	return ""
+
+
+## Предметы на поверхности объекта: [{"type": "hookah|jar|cup|coals|tongs|napkins|mouthpiece_box", "at": [x, y], "color": "#rrggbb"}],
 ## at — смещение от центра объекта в клетках.
 func _validate_props(raw: Variant) -> String:
 	if not (raw is Array):
@@ -232,4 +271,6 @@ func _validate_props(raw: Variant) -> String:
 			return "at должен быть [x, y]"
 		if entry.has("color") and not Color.html_is_valid(str(entry["color"])):
 			return "некорректный color"
+		if entry.has("z") and not (entry["z"] is float or entry["z"] is int):
+			return "z должен быть числом (высота над основанием, px)"
 	return ""

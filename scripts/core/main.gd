@@ -12,6 +12,7 @@ var _runner := DialogueRunner.new()
 var _beats: StoryBeats = null
 var _recipes: RecipeSystem = null
 var _preparation: PreparationService = null
+var _manual_screen: ManualPreparationScreen = null
 var _reaction: GuestReaction = null
 var _station := HookahStation.new()
 var _order: Dictionary = {}
@@ -28,6 +29,8 @@ var _hookah_at_prep := false
 var _pending_serve := false
 var _book_from_mixer := false
 var _carrying := false
+## Кальян стоит на столе для кальянов (взят с полки или принесён на перезабивку).
+var _hookah_on_prep_table := false
 var _objective_label: Label = null
 
 @onready var _garage: GarageWorld = %Garage
@@ -47,6 +50,7 @@ func _ready() -> void:
 			GameLog.error("main", "Autoload не найден: %s" % autoload_name)
 
 	_add_debug_button()
+	_add_volume_slider()
 	_add_objective_label()
 	_garage.friend_arrived.connect(_on_friend_arrived)
 	_garage.friend_inhaled.connect(_on_friend_inhaled)
@@ -78,6 +82,7 @@ func _ready() -> void:
 		_preparation = PreparationService.create(_recipes)
 		if _preparation != null:
 			_preparation_screen.setup(_preparation)
+			_setup_manual_screen()
 	_effects = StoryEffects.new(_state)
 	_runner.effect_requested.connect(_effects.apply)
 	_refresh_objective()
@@ -124,6 +129,33 @@ func _on_friend_arrived(guest_id: String) -> void:
 			if _recipes != null:
 				_mixer.set_order_hint("💡 Заказ %s: %s" % [str(guest["name"]), OrderHint.suggest(_recipes.catalog, _order["preferences"], 2, _rng)])
 	_refresh_objective()
+
+
+## Ручное приготовление: экран создаётся кодом и стоит поверх окна приготовления.
+func _setup_manual_screen() -> void:
+	_manual_screen = ManualPreparationScreen.new()
+	$UI/Root.add_child(_manual_screen)
+	_manual_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_manual_screen.setup(_preparation)
+	_preparation_screen.manual_requested.connect(_on_manual_requested)
+	_manual_screen.closed.connect(_on_manual_closed)
+	_manual_screen.served.connect(_on_manual_served)
+
+
+func _on_manual_requested(recipe_id: String) -> void:
+	_preparation_screen.suspend()
+	_manual_screen.open(recipe_id, not _state.has_flag("manual_done"))
+	_update_input_lock()
+
+
+func _on_manual_closed() -> void:
+	_preparation_screen.resume()
+	_update_input_lock()
+
+
+func _on_manual_served(result: Dictionary) -> void:
+	_state.set_flag("manual_done", true)
+	_preparation_screen.complete_with(result)
 
 
 func _on_friend_inhaled(_guest_id: String) -> void:
@@ -190,7 +222,7 @@ func _with_order_text(dialogue: Dictionary) -> Dictionary:
 
 ## Игра "заморожена" для мира, пока открыт любой экран или идёт диалог.
 func _update_input_lock() -> void:
-	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or _runner.is_active)
+	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _runner.is_active)
 
 
 func _on_action_requested(action_id: String) -> void:
@@ -206,6 +238,14 @@ func _on_action_requested(action_id: String) -> void:
 			elif _garage.ready_friend_id() == "" or not _state.has_flag("denis_order_known"):
 				_toast.show_message("Сначала узнай, чего хочет Денис.")
 			else:
+				if not _hookah_on_prep_table and not _hookah_at_prep:
+					_carrying = true
+					_update_input_lock()
+					_refresh_objective()
+					await _garage.fetch_random_hookah()
+					_carrying = false
+					_hookah_on_prep_table = true
+					_refresh_objective()
 				_preparation_screen.open()
 		"retake_hookah":
 			_update_input_lock()
@@ -215,6 +255,7 @@ func _on_action_requested(action_id: String) -> void:
 			await _garage.carry_hookah_to_prep_table()
 			_carrying = false
 			_hookah_at_prep = true
+			_hookah_on_prep_table = true
 			_apply_station()
 			_refresh_objective()
 			_preparation_screen.open()
@@ -260,14 +301,22 @@ func _on_preparation_closed() -> void:
 	_update_input_lock()
 	_refresh_objective()
 	await _garage.carry_hookah_to_guest_table()
-	_carrying = false
 	_hookah_at_prep = false
+	_hookah_on_prep_table = false
 	_update_input_lock()
-	if not _pending_verdict.is_empty():
+	if _pending_verdict.is_empty():
+		_carrying = false
+		_update_input_lock()
+	else:
 		var verdict := _pending_verdict
 		_pending_verdict = {}
 		_last_verdict = verdict
 		var guest_id := str(verdict["guest_id"])
+		# Гость сначала делает 3–5 затяжек и только потом выдаёт реакцию.
+		_garage.set_friend_smoking(guest_id, true, "")
+		await _garage.wait_for_friend_puffs(guest_id, randi_range(3, 5))
+		_carrying = false
+		_update_input_lock()
 		_garage.friend_react(guest_id, str(verdict["emoji"]))
 		_garage.set_friend_smoking(guest_id, _station.guest_smokes(), str(verdict["emoji"]))
 		GameLog.info("reaction", "%s: %s (score %.1f)" % [guest_id, str(verdict["emotion_id"]), float(verdict["score"])])
@@ -414,8 +463,12 @@ func _debug_reset_hookah() -> void:
 	_smoke_permission = false
 	_ask_blocked = false
 	_hookah_at_prep = false
+	_hookah_on_prep_table = false
 	_apply_station()
 	_garage.hide_object(GarageWorld.HOOKAH_OBJECT_ID)
+	_garage.hide_object(GarageWorld.HOOKAH_PREP_OBJECT_ID)
+	_garage.restock_shelf()
+	_garage.reset_hose()
 	if guest_id != "":
 		_garage.set_friend_smoking(guest_id, false)
 	_toast.show_message("Отладка: кальян снова пустой.")
@@ -426,6 +479,44 @@ func _debug_reset_hookah() -> void:
 func _toggle_fullscreen() -> void:
 	var fullscreen := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if fullscreen else DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## Громкость: ползунок рядом с кнопкой отладки; по умолчанию 0%.
+const DEFAULT_VOLUME_PERCENT := 0.0
+
+
+func _add_volume_slider() -> void:
+	var box := HBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	box.offset_left = -290.0
+	box.offset_right = -84.0
+	box.offset_top = 16.0
+	box.offset_bottom = 68.0
+	box.add_theme_constant_override("separation", 8)
+	box.alignment = BoxContainer.ALIGNMENT_END
+	var icon := Label.new()
+	icon.text = "🔊"
+	icon.add_theme_font_size_override("font_size", 28)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	box.add_child(icon)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 100.0
+	slider.step = 1.0
+	slider.value = DEFAULT_VOLUME_PERCENT
+	slider.custom_minimum_size = Vector2(150, 0)
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.focus_mode = Control.FOCUS_NONE
+	slider.tooltip_text = "Громкость"
+	slider.value_changed.connect(_set_volume_percent)
+	box.add_child(slider)
+	$UI/Root.add_child(box)
+	_set_volume_percent(DEFAULT_VOLUME_PERCENT)
+
+
+func _set_volume_percent(percent: float) -> void:
+	AudioServer.set_bus_volume_db(0, linear_to_db(clampf(percent, 0.0, 100.0) / 100.0))
+	AudioServer.set_bus_mute(0, percent <= 0.0)
 
 
 ## Кнопка 🔃 в правом верхнем углу (только в отладочной сборке).

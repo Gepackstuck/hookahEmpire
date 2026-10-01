@@ -8,6 +8,7 @@ extends RefCounted
 signal preparation_completed(result: Dictionary)
 
 const MODE_QUICK := "quick"
+const MODE_MANUAL := "manual"
 
 var recipes: RecipeSystem
 var config: PreparationConfig
@@ -40,6 +41,20 @@ func preview(recipe_id: String, choices: Dictionary, preparer: String = "player"
 	if recipe.is_empty():
 		return {"ok": false, "error": "Рецепт не найден: %s" % recipe_id}
 	var execution := ExecutionScoring.evaluate(recipe, choices, recipes.catalog, recipes.config, config)
+	return _build_result(recipe_id, recipe, execution, choices, preparer, mode)
+
+
+## Ручной режим (M5): уровни параметров {id: float} и дополнительные оценки действий игрока (см. ExecutionScoring.evaluate_levels).
+## Без записи результата, как preview.
+func preview_manual(recipe_id: String, levels: Dictionary, extras: Dictionary = {}, preparer: String = "player") -> Dictionary:
+	var recipe := recipes.get_recipe(recipe_id)
+	if recipe.is_empty():
+		return {"ok": false, "error": "Рецепт не найден: %s" % recipe_id}
+	var execution := ExecutionScoring.evaluate_levels(recipe, levels, recipes.catalog, recipes.config, config, extras)
+	return _build_result(recipe_id, recipe, execution, levels, preparer, MODE_MANUAL)
+
+
+func _build_result(recipe_id: String, recipe: Dictionary, execution: Dictionary, choices: Dictionary, preparer: String, mode: String) -> Dictionary:
 	if not execution["ok"]:
 		return {"ok": false, "error": execution["error"]}
 	var quality_band := recipes.config.band_for(float(recipe["best_score"]))

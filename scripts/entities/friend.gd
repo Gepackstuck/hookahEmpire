@@ -96,6 +96,42 @@ func _sync_smoke_position() -> void:
 	_smoke.position = _figure.mouth_position()
 
 
+func hand_position() -> Vector2:
+	return position + _figure.hand_position()
+
+
+func mouth_position() -> Vector2:
+	return position + _figure.mouth_position()
+
+
+func facing_sign() -> float:
+	return 1.0 if _figure.facing_right else -1.0
+
+
+func puff_amount() -> float:
+	return _figure.puff_amount()
+
+
+func set_holding(value: bool) -> void:
+	_figure.holding = value
+
+
+func set_piece_color(color: Color) -> void:
+	_figure.piece_color = color
+
+
+func piece_color() -> Color:
+	return _figure.piece_color
+
+
+func is_smoking() -> bool:
+	return _smoke.active
+
+
+func smoke_emitter() -> SmokeEmitter:
+	return _smoke
+
+
 ## Курит кальян затяжками (друг курит кальян).
 func set_smoking(on: bool, mood_emoji: String = "") -> void:
 	_smoke.active = on

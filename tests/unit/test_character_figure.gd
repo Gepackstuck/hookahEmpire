@@ -37,16 +37,11 @@ func test_hookah_squash_changes_and_restores_scale() -> void:
 	var hookah := GarageObject.new()
 	tree.root.add_child(hookah)
 	hookah.setup(definition)
-	var sprite: Sprite2D = null
-	for child in hookah.get_children():
-		if child is Sprite2D:
-			sprite = child
-	assert_true(sprite != null, "у кальяна должен быть спрайт")
-	var base_y := sprite.scale.y
+	assert_true(hookah._hookah_squash == 0.0)
 	hookah._apply_squash(1.0)
-	assert_true(sprite.scale.y < base_y, "кальян сплющен")
+	assert_true(hookah._hookah_squash > 0.9, "кальян сплющен")
 	hookah._apply_squash(0.0)
-	assert_true(is_equal_approx(sprite.scale.y, base_y), "кальян вернулся")
+	assert_true(hookah._hookah_squash == 0.0, "кальян вернулся")
 	tree.root.remove_child(hookah)
 	hookah.free()
 

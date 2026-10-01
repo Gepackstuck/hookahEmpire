@@ -111,3 +111,54 @@ func test_real_table_has_props() -> void:
 	for object in layout.objects:
 		if object["id"] == "table_test":
 			assert_true(object["visual"]["props"].size() >= 5)
+
+
+func test_shelf_and_neon_sign_in_real_layout() -> void:
+	var layout := GarageLayout.load_file(LAYOUT_PATH)
+	assert_true(layout.is_valid(), str(layout.errors))
+	var by_id := {}
+	for object in layout.objects:
+		by_id[object["id"]] = object
+	assert_true(by_id.has("shelf_hookah") and by_id.has("sign_neon"))
+	assert_eq(by_id["shelf_hookah"]["visual"]["type"], "shelf")
+	assert_true(by_id["shelf_hookah"]["visual"]["props"].size() >= 5, "на полке есть банки и мелочь")
+	var slots: Dictionary = by_id["shelf_hookah"]["visual"]["hookah_slots"]
+	assert_true(slots["rows"].size() * int(slots["count"]) >= 12, "на полке много кальянов")
+	var blinking := 0
+	for line in by_id["sign_neon"]["visual"]["lines"]:
+		if bool(line.get("blink", false)):
+			blinking += 1
+	assert_eq(blinking, 1, "моргает одна строка")
+
+
+func test_neon_sign_validation() -> void:
+	var data := _valid_dict()
+	data["objects"][0]["visual"] = {"type": "neon_sign"}
+	assert_true(not GarageLayout.from_dict(data).is_valid(), "без lines вывеска невалидна")
+	data["objects"][0]["visual"] = {"type": "neon_sign", "lines": [{"text": "Привет", "color": "#ffffff"}]}
+	assert_true(GarageLayout.from_dict(data).is_valid(), str(GarageLayout.from_dict(data).errors))
+
+
+func test_hookah_slots_and_tongs_validation() -> void:
+	var data := _valid_dict()
+	data["objects"][0]["visual"] = {"type": "shelf", "hookah_slots": {"rows": [{"z": 4}], "count": 5, "span": 3.0}, "props": [{"type": "tongs", "at": [0, 0]}]}
+	var layout := GarageLayout.from_dict(data)
+	assert_true(layout.is_valid(), str(layout.errors))
+	data["objects"][0]["visual"]["hookah_slots"] = {"rows": [], "count": 5, "span": 3.0}
+	assert_true(not GarageLayout.from_dict(data).is_valid(), "пустые ряды")
+	data["objects"][0]["visual"]["hookah_slots"] = {"rows": [{"z": 4}], "count": 0, "span": 3.0}
+	assert_true(not GarageLayout.from_dict(data).is_valid(), "count < 1")
+	data["objects"][0]["visual"]["hookah_slots"] = {"rows": [{"z": 4}], "count": 3, "span": 3.0, "palette": ["zzz"]}
+	assert_true(not GarageLayout.from_dict(data).is_valid(), "плохой цвет палитры")
+
+
+func test_prep_hookah_object_and_table_colors_do_not_clash_with_shelf() -> void:
+	var layout := GarageLayout.load_file(LAYOUT_PATH)
+	var by_id := {}
+	for object in layout.objects:
+		by_id[object["id"]] = object
+	assert_eq(by_id["hookah_prep"]["visual"]["type"], "hookah")
+	assert_true(by_id["hookah_prep"]["hidden"], "на столе для кальянов кальяна изначально нет")
+	for prop in by_id["table_test"]["visual"]["props"]:
+		if prop["type"] == "hookah":
+			assert_true(not HookahArt.PALETTE.has(str(prop["color"])), "цвет кальяна на столе-смесителе не из палитры полки")

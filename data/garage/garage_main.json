@@ -59,7 +59,8 @@
               -1.35,
               -0.35
             ],
-            "color": "#3fa7d6"
+            "color": "#3a3d46",
+            "handle": 1
           },
           {
             "type": "hookah",
@@ -67,7 +68,8 @@
               -0.35,
               0.3
             ],
-            "color": "#d65a7a"
+            "color": "#dfe9f0",
+            "handle": 4
           },
           {
             "type": "jar",
@@ -114,6 +116,13 @@
             "at": [
               1.0,
               0.55
+            ]
+          },
+          {
+            "type": "tongs",
+            "at": [
+              1.0,
+              -0.25
             ]
           }
         ]
@@ -166,10 +175,17 @@
           {
             "type": "cup",
             "at": [
-              1.05,
-              0.45
+              1.2,
+              -0.6
             ],
             "color": "#6bd6c7"
+          },
+          {
+            "type": "tongs",
+            "at": [
+              -0.5,
+              -0.75
+            ]
           }
         ]
       },
@@ -240,20 +256,18 @@
         "top_extra": 15,
         "props": [
           {
-            "type": "cup",
+            "type": "napkins",
             "at": [
-              -0.6,
-              0.5
-            ],
-            "color": "#f0c14b"
+              0.7,
+              -0.05
+            ]
           },
           {
-            "type": "jar",
+            "type": "mouthpiece_box",
             "at": [
-              0.6,
-              -0.55
-            ],
-            "color": "#9a6bd6"
+              0.85,
+              -0.7
+            ]
           }
         ]
       },
@@ -284,14 +298,36 @@
       ],
       "blocks": false,
       "visual": {
-        "type": "texture",
-        "path": "res://art/furniture/hookah_test.png",
-        "height": 84,
+        "type": "hookah",
+        "color": "#22b8ff",
         "lift": 26
       },
       "anchor": [
         14.0,
         11.05
+      ],
+      "hidden": true
+    },
+    {
+      "id": "hookah_prep",
+      "name": "Кальян (у стола для кальянов)",
+      "cell": [
+        14,
+        6
+      ],
+      "size": [
+        1,
+        1
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "hookah",
+        "color": "#22b8ff",
+        "lift": 26
+      },
+      "anchor": [
+        15.9,
+        7.45
       ],
       "hidden": true
     },
@@ -325,6 +361,176 @@
           2
         ],
         "radius": 1.0
+      }
+    },
+    {
+      "id": "shelf_hookah",
+      "name": "Кальянная полка",
+      "cell": [
+        5,
+        0
+      ],
+      "size": [
+        5,
+        1
+      ],
+      "blocks": true,
+      "visual": {
+        "type": "shelf",
+        "color": "#2b211b",
+        "height": 147,
+        "planks": [
+          0,
+          61,
+          121,
+          144
+        ],
+        "hookah_slots": {
+          "rows": [
+            {
+              "z": 4
+            },
+            {
+              "z": 65
+            }
+          ],
+          "count": 7,
+          "span": 4.2
+        },
+        "props": [
+          {
+            "type": "jar",
+            "at": [
+              -2.1,
+              0.0
+            ],
+            "z": 125,
+            "color": "#ff7a1a"
+          },
+          {
+            "type": "jar",
+            "at": [
+              -1.65,
+              0.0
+            ],
+            "z": 125,
+            "color": "#7bd62f"
+          },
+          {
+            "type": "jar",
+            "at": [
+              -1.2,
+              0.0
+            ],
+            "z": 125,
+            "color": "#a64dff"
+          },
+          {
+            "type": "jar",
+            "at": [
+              -0.75,
+              0.0
+            ],
+            "z": 125,
+            "color": "#ff3b6b"
+          },
+          {
+            "type": "jar",
+            "at": [
+              -0.3,
+              0.0
+            ],
+            "z": 125,
+            "color": "#22b8ff"
+          },
+          {
+            "type": "cup",
+            "at": [
+              0.35,
+              0.0
+            ],
+            "z": 125,
+            "color": "#f0c14b"
+          },
+          {
+            "type": "coals",
+            "at": [
+              0.85,
+              0.0
+            ],
+            "z": 125
+          },
+          {
+            "type": "tongs",
+            "at": [
+              1.25,
+              0.0
+            ],
+            "z": 125
+          }
+        ]
+      }
+    },
+    {
+      "id": "sign_neon",
+      "name": "Неоновая вывеска",
+      "cell": [
+        10,
+        0
+      ],
+      "size": [
+        5,
+        1
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "neon_sign",
+        "lines": [
+          {
+            "text": "Кальянная полка",
+            "color": "#35e0ff",
+            "size": 17
+          },
+          {
+            "text": "ничтожно мала",
+            "color": "#ff3fa4",
+            "size": 19,
+            "blink": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "sign_script",
+      "name": "Вывеска",
+      "cell": [
+        0,
+        1
+      ],
+      "size": [
+        1,
+        6
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "neon_sign",
+        "wall": "left",
+        "panel": "#15110f",
+        "frame": "#e8c46a",
+        "z": 46,
+        "panel_height": 62,
+        "lines": [
+          {
+            "text": "Наши кальяны —",
+            "color": "#ffe9a8",
+            "size": 22
+          },
+          {
+            "text": "крепче, чем ваши отношения",
+            "color": "#ffe9a8",
+            "size": 19
+          }
+        ]
       }
     }
   ],
