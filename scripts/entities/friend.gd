@@ -208,7 +208,7 @@ func _process(delta: float) -> void:
 	_sync_smoke_position()
 	if not _walker.is_walking():
 		return
-	var finished := _walker.step(minf(delta, MAX_FRAME_DELTA))
+	var finished := _walker.step(minf(delta, MAX_FRAME_DELTA * maxf(Engine.time_scale, 1.0)))
 	_sync_position()
 	if finished:
 		_figure.moving = false

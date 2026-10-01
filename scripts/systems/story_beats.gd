@@ -44,6 +44,23 @@ func find_for_progress(progress: String) -> Dictionary:
 	return {}
 
 
+## Прогресс «гость обслужен» для гостя guest_id (friend_01_arrives -> friend_01_done); "" — у гостя нет бита.
+func done_progress_for(guest_id: String) -> String:
+	for beat in beats:
+		if str(beat["guest"]) == guest_id and str(beat["sets_progress"]).ends_with("_arrives"):
+			return str(beat["sets_progress"]).trim_suffix("_arrives") + "_done"
+	return ""
+
+
+## Прогресс «гость сейчас у нас» (приход или разговор окончен) для guest_id: сюда относится и "<...>_intro_done".
+func is_in_progress_of(guest_id: String, progress: String) -> bool:
+	var done := done_progress_for(guest_id)
+	if done == "":
+		return false
+	var base := done.trim_suffix("_done")
+	return progress == base + "_arrives" or progress == base + "_intro_done"
+
+
 func _parse(data: Dictionary) -> void:
 	var raw: Variant = data.get("beats")
 	if not (raw is Array):

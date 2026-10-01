@@ -35,6 +35,10 @@ var piece_hidden := false
 ## Держит перед собой конец шланга (рука вперёд).
 var holding := false
 
+## Жест на месте (idle кальянщика): "scrub", "read", "pat", "think", "drink", "juggle"; "" — нет.
+var gesture := ""
+var juggle_colors: Array[Color] = [Color("#ff7a1a"), Color("#22b8ff"), Color("#7bd62f")]
+
 var pose: String = POSE_STAND
 var moving: bool = false
 var puffing: bool = false
@@ -44,6 +48,8 @@ var view: String = VIEW_SIDE
 var _phase: float = 0.0
 var _time: float = 0.0
 var _hand_t: float = 0.0
+var _gesture_time := 0.0
+var _gesture_hands := {true: Vector2.ZERO, false: Vector2.ZERO}
 var _last_hand := Vector2.ZERO
 
 
@@ -123,7 +129,7 @@ func walk_toward(screen_delta: Vector2) -> void:
 
 ## Фактический ракурс: при затяжке и шланге в руке рисуем боком (руки и шланг рассчитаны на профиль).
 func effective_view() -> String:
-	if puffing or holding or _hand_t > 0.02 or idle_dance:
+	if puffing or holding or _hand_t > 0.02 or idle_dance or gesture != "":
 		return VIEW_SIDE
 	return view
 
@@ -158,6 +164,7 @@ func _draw_lanyard(shoulder: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_gesture_time += delta
 	if moving and pose == POSE_STAND:
 		_phase += delta * WALK_FREQUENCY
 	_hand_t = move_toward(_hand_t, 1.0 if puffing else 0.0, delta * 6.0)
@@ -242,6 +249,7 @@ func _draw_standing() -> void:
 	_limb(shoulder + Vector2(0, 1.0), head + Vector2(0, 5.0), 5.0, skin.darkened(0.08))
 	_draw_head(head)
 	_arm(shoulder + Vector2(2.5, 3.0), true)
+	_draw_gesture_extras()
 
 
 ## Рука: качается при ходьбе, идёт ко рту при затяжке, у танцора в покое поднята.
@@ -265,9 +273,84 @@ func _arm(shoulder: Vector2, near: bool) -> void:
 			hand = hand.lerp(_grip_local(), _hand_t)
 			elbow = elbow.lerp(shoulder + Vector2(7.0, 6.0), _hand_t)
 		_last_hand = hand
+	if gesture != "" and not moving and not holding and _hand_t < 0.02:
+		var g := _gesture_pose(shoulder, near)
+		if not g.is_empty():
+			hand = g[0]
+			elbow = g[1]
+			if near:
+				_last_hand = hand
+		_gesture_hands[near] = hand
 	_limb(shoulder, elbow, 5.2, tone)
 	_limb(elbow, hand, 4.8, tone)
 	draw_circle(hand, 2.8, skin if near else skin.darkened(0.2))
+
+
+## Включает жест (см. gesture); colors — цвета банок для жонглирования.
+func set_gesture(gesture_name: String, colors: Array = []) -> void:
+	gesture = gesture_name
+	_gesture_time = 0.0
+	if not colors.is_empty():
+		juggle_colors.clear()
+		for c in colors:
+			juggle_colors.append(c)
+
+
+## Насколько поднят стакан ко рту (0..1) в цикле питья.
+func _drink_k() -> float:
+	var u := fposmod(_gesture_time, 4.0) / 4.0
+	return smoothstep(0.0, 1.0, clampf(sin(u * PI) * 2.0, 0.0, 1.0))
+
+
+## Положение [кисть, локоть] для жеста; пустой массив — рука в обычном положении.
+func _gesture_pose(shoulder: Vector2, near: bool) -> Array:
+	var t := _gesture_time
+	match gesture:
+		"scrub":
+			if near:
+				return [shoulder + Vector2(11.0 + sin(t * 10.0) * 3.0, 9.0 + sin(t * 5.0)), shoulder + Vector2(5.0, 9.0)]
+			return [shoulder + Vector2(9.0, 12.0), shoulder + Vector2(4.0, 9.5)]
+		"read":
+			if near:
+				return [shoulder + Vector2(12.0 + sin(t * 1.6) * 5.0, -6.0 + sin(t * 0.8) * 2.5), shoulder + Vector2(6.0, 3.0)]
+		"pat":
+			if near:
+				var swing := sin(t * 11.0)
+				return [shoulder + Vector2(11.0 + maxf(0.0, swing) * 2.0, -16.0 + swing * 3.0), shoulder + Vector2(7.0, -4.0)]
+		"think":
+			if near:
+				return [_head_local() + Vector2(6.0, 8.0), shoulder + Vector2(7.0, 6.0)]
+		"drink":
+			if near:
+				var k := _drink_k()
+				var rest := shoulder + Vector2(9.0, 12.0)
+				var up := _mouth_local() + Vector2(1.0, 5.0)
+				return [rest.lerp(up, k), (shoulder + Vector2(5.0, 9.0)).lerp(shoulder + Vector2(8.0, 5.0), k)]
+		"juggle":
+			var wobble := t * 7.8
+			if near:
+				return [shoulder + Vector2(10.0 + cos(wobble) * 1.5, 4.0 + sin(wobble) * 2.0), shoulder + Vector2(6.0, 7.0)]
+			return [shoulder + Vector2(6.0 - cos(wobble) * 1.5, 5.0 - sin(wobble) * 2.0), shoulder + Vector2(3.0, 8.0)]
+	return []
+
+
+## Предметы жеста: летающие банки (жонглирование) и стакан с водой (питьё).
+func _draw_gesture_extras() -> void:
+	if gesture == "juggle":
+		var center: Vector2 = (_gesture_hands[true] + _gesture_hands[false]) * 0.5
+		for k in 3:
+			var a := TAU * fposmod(_gesture_time * 0.65 + float(k) / 3.0, 1.0)
+			var at := center + Vector2(cos(a) * 8.0, -3.0 - absf(sin(a)) * 22.0)
+			draw_set_transform(at, 0.0, Vector2(0.45, 0.45))
+			HookahArt.draw_jar(self, Vector2.ZERO, juggle_colors[k % juggle_colors.size()])
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	elif gesture == "drink":
+		var hand: Vector2 = _gesture_hands[true]
+		var k := _drink_k()
+		draw_set_transform(hand + Vector2(1.5, -2.0), k * 1.0, Vector2.ONE)
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.6, -4.0), Vector2(2.6, -4.0), Vector2(2.0, 3.0), Vector2(-2.0, 3.0)]), Color(0.85, 0.93, 1.0, 0.8))
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.4, -1.0), Vector2(2.4, -1.0), Vector2(2.0, 3.0), Vector2(-2.0, 3.0)]), Color(0.45, 0.75, 1.0, 0.9))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_head(head: Vector2) -> void:

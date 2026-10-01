@@ -5,6 +5,7 @@ extends Node2D
 
 ## Гость сделал затяжку (Main считает их для повторной просьбы).
 signal friend_inhaled(guest_id: String)
+signal player_inhaled
 signal message_requested(text: String)
 signal dialogue_requested(dialogue_id: String)
 signal action_requested(action_id: String)
@@ -317,12 +318,181 @@ func clear_all_head_labels() -> void:
 			(node as Friend).head_labels().clear_all()
 
 
+## M7: состояние углей кальяна на столе гостя (0 остыли … 3 сгорели) и эмодзи-индикатор над ним.
+func set_hookah_heat(coal_state: int, badge: String, subtle_badge: bool = false) -> void:
+	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
+	if hookah is GarageObject:
+		(hookah as GarageObject).set_coal_state(coal_state)
+		(hookah as GarageObject).set_badge(badge, subtle_badge)
+
+
+## Кальянщик меняет угли на кальяне гостя: подходит к столу (если стоит далеко), снимает старые, кладёт свежие.
+## Корутина: завершается, когда на кальяне свежие угли.
+func service_coals(seconds: float) -> void:
+	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
+	if not (hookah is GarageObject) or _player == null:
+		return
+	if _serve_cell.x >= 0 and Vector2(_serve_cell).distance_to(_player.grid_position) > 1.6:
+		await _walk_to(_serve_cell)
+	_player.face_toward((hookah as GarageObject).position.x)
+	await (hookah as GarageObject).play_coal_swap(seconds)
+
+
 ## Видимость работы у объекта (idle): у раковины льётся вода, остальное — только поза/эмодзи над головой.
 func set_idle_work(object_id: String, on: bool) -> void:
 	if object_id == SINK_OBJECT_ID:
 		var sink: Variant = _objects.get(SINK_OBJECT_ID)
 		if sink is GarageObject:
 			(sink as GarageObject).set_washing(on)
+
+
+## Прерывает идущую автоматическую ходьбу кальянщика (например, когда у гостя появилось настоящее дело).
+func cancel_walk() -> void:
+	if _player != null:
+		_player.cancel_auto_walk()
+
+
+const JUGGLE_COLORS: Array[Color] = [Color("#ff7a1a"), Color("#22b8ff"), Color("#7bd62f"), Color("#ff4f9a"), Color("#b574ff"), Color("#ffd23a")]
+
+
+## Ждёт seconds секунд; false — если stop() вернул true (появилось настоящее дело).
+func _idle_wait(seconds: float, stop: Callable) -> bool:
+	var elapsed := 0.0
+	while elapsed < seconds:
+		if stop.call():
+			return false
+		await get_tree().create_timer(0.1).timeout
+		elapsed += 0.1
+	return not stop.call()
+
+
+## Действие простоя кальянщика у объекта target (кальянщик уже стоит у него).
+## action: wash, gaze, look_mask, look_book, swap, juggle, think, read, pat, drink, stand.
+## stop — Callable без аргументов: true, когда надо бросить всё и идти работать. По окончании всё возвращается на место.
+func play_idle_action(target: String, action: String, seconds: float, stop: Callable) -> void:
+	if _player == null:
+		return
+	var node: Variant = _objects.get(target)
+	match action:
+		"wash":
+			await _idle_wash(node, seconds, stop, true)
+		"gaze":
+			await _idle_wash(node, seconds, stop, false)
+		"juggle", "drink", "think", "read", "pat":
+			var colors: Array = JUGGLE_COLORS.duplicate()
+			colors.shuffle()
+			_player.set_gesture(action, colors.slice(0, 3))
+			await _idle_wait(seconds, stop)
+		"look_mask", "look_book":
+			await _idle_look(node, action == "look_mask", seconds, stop)
+		"swap":
+			await _idle_swap(node, seconds, stop)
+		_:
+			await _idle_wait(seconds, stop)
+	_player.clear_gesture()
+
+
+func _idle_wash(node: Variant, seconds: float, stop: Callable, scrub: bool) -> void:
+	var sink := node as GarageObject
+	if sink != null:
+		var color := _hookah_color
+		color.a = 1.0
+		sink.set_washing(true, color if scrub else Color(0, 0, 0, 0), "flask" if randf() < 0.5 else "hose")
+	if scrub:
+		_player.set_gesture("scrub")
+	await _idle_wait(seconds, stop)
+	if sink != null:
+		sink.set_washing(false)
+
+
+## Берёт с полки маску или книгу, рассматривает (покачивает в руках) и кладёт обратно.
+func _idle_look(node: Variant, mask: bool, seconds: float, stop: Callable) -> void:
+	var shelf := node as GarageObject
+	if shelf == null:
+		await _idle_wait(seconds, stop)
+		return
+	var options: Array = []
+	for candidate: Dictionary in shelf.image_props():
+		if str(candidate["texture"]).contains("mask") == mask:
+			options.append(candidate)
+	if options.is_empty():
+		await _idle_wait(seconds, stop)
+		return
+	var entry: Dictionary = options.pick_random()
+	var index := int(entry["index"])
+	var texture := shelf.prop_texture(index)
+	if texture == null:
+		await _idle_wait(seconds, stop)
+		return
+	shelf.set_prop_hidden(index, true)
+	_player.set_carrying(texture, minf(float(entry["height"]) * 1.4, 36.0))
+	_player.set_holding(true)
+	var elapsed := 0.0
+	while elapsed < seconds and not stop.call():
+		_player.set_carried_rotation(sin(elapsed * 1.8) * 0.22)
+		await get_tree().create_timer(0.1).timeout
+		elapsed += 0.1
+	_player.set_carried_rotation(0.0)
+	_player.set_carrying(null)
+	_player.set_holding(false)
+	shelf.set_prop_hidden(index, false)
+
+
+## Меняет два кальяна на полке местами: берёт первый, у второго меняет в руках и ставит второй на место первого.
+func _idle_swap(node: Variant, seconds: float, stop: Callable) -> void:
+	var shelf := node as GarageObject
+	var present: Array = shelf.free_hookah_slots() if shelf != null else []
+	if present.size() < 2:
+		_player.set_gesture("juggle", JUGGLE_COLORS.slice(0, 3))
+		await _idle_wait(seconds, stop)
+		return
+	present.shuffle()
+	var a: int = present[0]
+	var b: int = present[1]
+	# Чаще берём кальяны подальше друг от друга, чтобы переход был заметен.
+	for candidate: int in present:
+		if candidate != a and absi(candidate - a) >= 2:
+			b = candidate
+			break
+	var color_a := shelf.hookah_slot_color(a)
+	var color_b := shelf.hookah_slot_color(b)
+	var stage := 0
+	while true:
+		await _walk_to(shelf.shelf_front_cell(a))
+		if stop.call():
+			break
+		_player.face_toward(shelf.position.x)
+		shelf.take_hookah(a)
+		_player.set_carrying_hookah(color_a, 0)
+		_player.set_holding(true)
+		stage = 1
+		if not await _idle_wait(0.7, stop):
+			break
+		await _walk_to(shelf.shelf_front_cell(b))
+		if stop.call():
+			break
+		shelf.put_hookah(b, color_a)
+		_player.set_carrying_hookah(color_b, 0)
+		stage = 2
+		if not await _idle_wait(0.9, stop):
+			break
+		await _walk_to(shelf.shelf_front_cell(a))
+		if stop.call():
+			break
+		shelf.put_hookah(a, color_b)
+		_player.set_carrying(null)
+		_player.set_holding(false)
+		stage = 3
+		await _idle_wait(0.6, stop)
+		break
+	# Прервали посередине — возвращаем всё на полку как есть.
+	if stage == 1:
+		shelf.put_hookah(a, color_a)
+	elif stage == 2:
+		shelf.put_hookah(a, color_b)
+	if stage != 3:
+		_player.set_carrying(null)
+		_player.set_holding(false)
 
 
 func has_object(object_id: String) -> bool:
@@ -479,6 +649,12 @@ func mouthpieces_low(min_count: int = 2) -> bool:
 	return table is GarageObject and (table as GarageObject).box_piece_count() < min_count
 
 
+## Сколько мундштуков сейчас в коробке у стола гостя.
+func mouthpiece_count() -> int:
+	var table: Variant = _objects.get("table_guest")
+	return (table as GarageObject).box_piece_count() if table is GarageObject else 0
+
+
 ## Кальянщик подходит вплотную к коробке с мундштуками (клетка рядом, поворот к столу гостя).
 func walk_to_mouthpiece_box() -> void:
 	var table: Variant = _objects.get("table_guest")
@@ -596,6 +772,9 @@ func carry_hookah_to_guest_table() -> void:
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
+	# Кальянщик может быть где угодно (например, у стола смешивания после перезабивки): сначала идёт к столу для кальянов.
+	if _prep_cell.x >= 0 and Vector2(_prep_cell).distance_to(_player.grid_position) > 1.2:
+		await _walk_to(_prep_cell)
 	var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
 	if prep is GarageObject:
 		_player.face_toward((prep as GarageObject).position.x)
@@ -603,7 +782,7 @@ func carry_hookah_to_guest_table() -> void:
 		await (prep as GarageObject).play_pack_sequence()
 	await _insert_hose()
 	# Шланг вставлен: 2–3 затяжки у стола для кальянов, и только потом несём к гостю.
-	await _warm_up_puffs(2, 3)
+	await _warm_up_puffs(4, 6, 0.9, 1.8)
 	hide_object(HOOKAH_PREP_OBJECT_ID)
 	_hose_carried()
 	await _walk_carrying(_serve_cell)
@@ -622,6 +801,12 @@ func carry_hookah_to_prep_table() -> void:
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
+	# Сначала идём к столу гостя за кальяном — кальян не телепортируется, шланг не тянется через гараж.
+	if _serve_cell.x >= 0 and Vector2(_serve_cell).distance_to(_player.grid_position) > 1.2:
+		await _walk_to(_serve_cell)
+	var guest_hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
+	if guest_hookah is GarageObject:
+		_player.face_toward((guest_hookah as GarageObject).position.x)
 	hide_object(HOOKAH_OBJECT_ID)
 	_hose_holder = null
 	_hose_at_guest = false
@@ -694,6 +879,7 @@ func _update_hose(delta: float) -> void:
 		var cover_node: Variant = _objects.get(_hose_cover_id)
 		_hose.cover_squash = (cover_node as GarageObject).hookah_squash() if cover_node is GarageObject else 0.0
 		_hose.cover_top = (cover_node as GarageObject).hookah_top() if cover_node is GarageObject else 0
+		_hose.cover_heat_state = (cover_node as GarageObject).coal_state() if cover_node is GarageObject else 1
 	if _hose_aim_fn.is_valid():
 		var aim: Vector2 = _hose_aim_fn.call()
 		if aim != Vector2.ZERO:
@@ -821,10 +1007,10 @@ func _guest_takes_mouthpiece() -> void:
 
 
 ## Раскурка кальянщиком: min_puffs–max_puffs коротких тяжек.
-func _warm_up_puffs(min_puffs: int = 2, max_puffs: int = 4) -> void:
+func _warm_up_puffs(min_puffs: int = 2, max_puffs: int = 4, min_len: float = 0.5, max_len: float = 1.3) -> void:
 	var puffs := randi_range(min_puffs, max_puffs)
 	for i in puffs:
-		await _player.puff(randf_range(0.5, 1.3))
+		await _player.puff(randf_range(min_len, max_len))
 		await get_tree().create_timer(randf_range(0.2, 0.5)).timeout
 
 
@@ -1026,6 +1212,7 @@ func wait_for_friend_puffs(guest_id: String, count: int) -> void:
 
 
 func _on_player_inhale(_duration: float) -> void:
+	player_inhaled.emit()
 	if _pending_smoke_message.is_empty() or not _player.seated:
 		return
 	_puffs_until_message -= 1

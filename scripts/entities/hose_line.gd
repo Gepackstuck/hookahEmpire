@@ -34,6 +34,7 @@ var cover_base := Vector2.ZERO
 var cover_color := Color("#22b8ff")
 var cover_squash := 0.0
 var cover_top := 0
+var cover_heat_state := 1
 
 
 func _init() -> void:
@@ -88,7 +89,7 @@ func _draw() -> void:
 	if piece.a > 0.0:
 		HookahArt.draw_mouthpiece(self, tip, piece_dir, piece, PIECE_SCALE)
 	if is_wrapped():
-		HookahArt.draw_hookah(self, cover_base, cover_color, false, cover_squash, 0, 0.0, cover_top)
+		HookahArt.draw_hookah(self, cover_base, cover_color, false, cover_squash, 0, 0.0, cover_top, cover_heat_state)
 
 
 func _draw_handle() -> void:

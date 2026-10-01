@@ -399,12 +399,13 @@
               "z": 65
             }
           ],
-          "count": 3,
-          "span": 2.6,
+          "count": 4,
+          "span": 3.9,
           "colors": [
             "#22b8ff",
             "#ff7a1a",
-            "#7bd62f"
+            "#7bd62f",
+            "#ff4f9a"
           ]
         },
         "props": [

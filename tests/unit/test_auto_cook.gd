@@ -143,4 +143,18 @@ func test_idle_targets_exist_in_layout() -> void:
 	for id in MainScript.IDLE_TARGETS:
 		assert_true(ids.has(id), "объект простоя '%s' есть в гараже" % id)
 		assert_true(not (MainScript.IDLE_TARGETS[id] as Array).is_empty())
-	assert_true(MainScript.IDLE_MIN_SECONDS == 3.0 and MainScript.IDLE_MAX_SECONDS == 6.0)
+	assert_true(MainScript.IDLE_MIN_SECONDS == 9.0 and MainScript.IDLE_MAX_SECONDS == 16.0)
+
+
+func test_idle_actions_defined_for_targets() -> void:
+	var known := ["wash", "gaze", "look_mask", "look_book", "swap", "juggle", "think", "read", "pat", "look", "drink", "stand"]
+	for id in MainScript.IDLE_ACTIONS:
+		assert_true(MainScript.IDLE_TARGETS.has(id), "у цели '%s' есть эмодзи" % id)
+		for action in MainScript.IDLE_ACTIONS[id]:
+			assert_true(known.has(action), "действие '%s' известно миру" % action)
+			assert_true(not (MainScript.IDLE_ACTIONS[id][action] as Array).is_empty())
+	assert_true(MainScript.IDLE_ACTIONS["sink_wash"].size() == 2 and MainScript.IDLE_ACTIONS["shelf_hookah"].size() == 4)
+
+
+func test_idle_weights_prefer_swap() -> void:
+	assert_true(float(MainScript.IDLE_WEIGHTS.get("swap", 1.0)) > 1.0, "перестановка кальянов выпадает чаще")

@@ -37,10 +37,21 @@ var _hookah_color := Color("#22b8ff")
 var _hookah_squash: float = 0.0
 ## Что стоит на кальяне-объекте: 0 — ничего, 1 — чаша, 2 — чаша с углями.
 var _hookah_top: int = 0
+var _coal_state: int = 1
+var _badge: Label = null
 ## Чаша, которую «забивают» рядом с кальяном (анимация подготовки): видна ли, с углями ли, где (px от точки кальяна).
 var _loose_visible: bool = false
 var _loose_coals: bool = false
 var _loose_pos := Vector2.ZERO
+# Анимация углей (щипцы, отдельные угольки, лоток, дымок): координаты — от основания кальяна.
+var _fx_coals: Array = []
+var _fx_tray := false
+var _fx_tray_pos := Vector2.ZERO
+var _tongs_on := false
+var _tongs_pos := Vector2.ZERO
+var _tongs_open := 2.2
+var _puff_t := -1.0
+var _puff_pos := Vector2.ZERO
 ## Слоты кальянов на полке: {at: Vector2 (клетки от центра), z: px, color: Color, taken: bool}.
 var _hookah_slots: Array[Dictionary] = []
 ## Мундштуки в коробочке (ячейка с нулевой прозрачностью — пустая).
@@ -51,6 +62,8 @@ var _washing: bool = false
 var _wash_time: float = 0.0
 ## Кальян, который моют в раковине (прозрачный цвет — никого нет).
 var _wash_color := Color(0, 0, 0, 0)
+var _wash_item := "hookah"
+var _hidden_props: Dictionary = {}
 
 
 func setup(definition: Dictionary) -> void:
@@ -197,9 +210,10 @@ func _draw() -> void:
 			_draw_neon_sign()
 		"hookah":
 			# Тень рисует сам кальян на поверхности стола (пол под столом не затеняем).
-			HookahArt.draw_hookah(self, Vector2(0, -_lift), _hookah_color, false, _hookah_squash, 0, 0.0, _hookah_top)
+			HookahArt.draw_hookah(self, Vector2(0, -_lift), _hookah_color, false, _hookah_squash, 0, 0.0, _hookah_top, _coal_state)
 			if _loose_visible:
 				HookahArt.draw_bowl(self, Vector2(0, -_lift) + _loose_pos, _hookah_color, _loose_coals)
+			_draw_coal_fx(Vector2(0, -_lift))
 		"emoji", "texture":
 			IsoDraw.draw_shadow(self, 18.0)
 	if _glow_level > 0.0:
@@ -331,6 +345,8 @@ func _sorted_props(raw: Variant) -> Array:
 func _draw_props(lift: Vector2) -> void:
 	_prop_hits.clear()
 	for prop in _props:
+		if _hidden_props.has(_props.find(prop)):
+			continue
 		var at: Array = prop["at"]
 		var base := IsoProjection.grid_to_screen(Vector2(float(at[0]), float(at[1]))) + lift + Vector2(0, -float(prop.get("z", 0.0)))
 		var color := Color.html(str(prop.get("color", "#6fb3d9")))
@@ -365,6 +381,29 @@ func hit_test(local: Vector2) -> Dictionary:
 		if (hit["rect"] as Rect2).has_point(local):
 			return {"kind": "image", "index": hit["index"], "texture": hit["texture"], "title": hit["title"], "description": hit.get("description", "")}
 	return {}
+
+
+## Предметы-картинки на объекте: [{index, texture, title, height}] (маска, книги на полке).
+func image_props() -> Array:
+	var result: Array = []
+	for i in _props.size():
+		var prop: Dictionary = _props[i]
+		if str(prop.get("type", "")) == "image":
+			result.append({"index": i, "texture": str(prop.get("texture", "")), "title": str(prop.get("title", "")), "height": float(prop.get("height", 24.0))})
+	return result
+
+
+func prop_texture(index: int) -> Texture2D:
+	return _prop_texture(str((_props[index] as Dictionary).get("texture", "")))
+
+
+## Предмет временно «в руках» кальянщика — с полки он пропадает.
+func set_prop_hidden(index: int, hidden: bool) -> void:
+	if hidden:
+		_hidden_props[index] = true
+	else:
+		_hidden_props.erase(index)
+	queue_redraw()
 
 
 func set_hover(hit: Dictionary) -> void:
@@ -582,8 +621,10 @@ func front_cell() -> Vector2i:
 
 
 ## Раковина: вода льётся и брызгает, пока идёт мытьё.
-func set_washing(value: bool, hookah_color: Color = Color(0, 0, 0, 0)) -> void:
+## item: "hookah" (целиком), "flask" (колба) или "hose" (шланг).
+func set_washing(value: bool, hookah_color: Color = Color(0, 0, 0, 0), item: String = "hookah") -> void:
 	_washing = value
+	_wash_item = item
 	_wash_color = hookah_color if value else Color(0, 0, 0, 0)
 	_wash_time = 0.0
 	set_process(value)
@@ -608,6 +649,31 @@ func _wash_origin() -> Vector2:
 ## Клапан кальяна в раковине (к нему крепится шланг, пока его моют).
 func wash_valve_position() -> Vector2:
 	return _wash_origin() + (HookahArt.VALVE * HookahArt.SCALE).rotated(_wash_tilt())
+
+
+## Колба в мойке: качается под струёй. Возвращает точку, куда бьёт вода.
+func _draw_wash_flask(origin: Vector2) -> Vector2:
+	var tilt := _wash_tilt() * 0.6
+	draw_set_transform(origin + Vector2(0, -3.0), tilt, Vector2.ONE)
+	var glass := _wash_color.lightened(0.6)
+	glass.a = 0.65
+	draw_circle(Vector2(0, -6.0), 7.0, glass)
+	draw_rect(Rect2(Vector2(-2.6, -20.0), Vector2(5.2, 10.0)), glass)
+	draw_arc(Vector2(0, -6.0), 7.0, 0.0, TAU, 20, _wash_color.darkened(0.2), 1.0)
+	draw_line(Vector2(-3.2, -20.0), Vector2(3.2, -20.0), _wash_color.darkened(0.3), 1.6)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	return origin + Vector2(0, -16.0).rotated(tilt)
+
+
+## Шланг в мойке: извивается под струёй. Возвращает точку, куда бьёт вода.
+func _draw_wash_hose(origin: Vector2) -> Vector2:
+	var pts := PackedVector2Array()
+	for i in 26:
+		pts.append(origin + Vector2(-12.0 + float(i) * 0.95, -6.0 + sin(float(i) * 0.7 + _wash_time * 3.0) * 4.0))
+	draw_polyline(pts, _wash_color.darkened(0.15), 3.2, true)
+	draw_polyline(pts, _wash_color.lightened(0.3), 1.0, true)
+	draw_circle(pts[pts.size() - 1], 2.2, Color("#e29a2e"))
+	return origin + Vector2(0, -8.0)
 
 
 ## Мойка: тумба, мойка с краном; при мытье — струя воды и брызги.
@@ -656,8 +722,14 @@ func _draw_sink() -> void:
 		if _wash_color.a > 0.0:
 			# Кальян в раковине: его качают под краном, струя бьёт в колбу.
 			var origin := _wash_origin() - position
-			HookahArt.draw_hookah(self, origin, _wash_color, false, 0.0, 0, _wash_tilt())
-			splash_at = origin + Vector2(0, -20).rotated(_wash_tilt())
+			match _wash_item:
+				"flask":
+					splash_at = _draw_wash_flask(origin)
+				"hose":
+					splash_at = _draw_wash_hose(origin)
+				_:
+					HookahArt.draw_hookah(self, origin, _wash_color, false, 0.0, 0, _wash_tilt())
+					splash_at = origin + Vector2(0, -20).rotated(_wash_tilt())
 		draw_line(spout_end + Vector2(0, 1), splash_at + Vector2(0, -1), water, 2.2)
 		for i in 18:
 			var t := fposmod(_wash_time * 1.8 + float(i) * 0.1618, 1.0)
@@ -803,32 +875,213 @@ func set_hookah_top(value: int) -> void:
 	queue_redraw()
 
 
+## Состояние углей (M7): 0 остыли, 1 обычные, 2 жарко, 3 сгорели.
+func set_coal_state(value: int) -> void:
+	if value == _coal_state:
+		return
+	_coal_state = value
+	queue_redraw()
+
+
+func coal_state() -> int:
+	return _coal_state
+
+
+## Эмодзи-индикатор над кальяном (жар/холод/гарь); "" — скрыть.
+## subtle — менее заметный вид (режим NPC): мельче и полупрозрачный.
+func set_badge(text: String, subtle: bool = false) -> void:
+	if _badge == null:
+		_badge = Label.new()
+		_badge.add_theme_font_size_override("font_size", 20)
+		_badge.z_index = 30
+		_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_badge.position = Vector2(-12.0, -_lift - 70.0)
+		add_child(_badge)
+	_badge.text = text
+	_badge.visible = text != ""
+	_badge.add_theme_font_size_override("font_size", 13 if subtle else 20)
+	_badge.modulate = Color(1, 1, 1, 0.5 if subtle else 1.0)
+	_badge.position = Vector2(-8.0 if subtle else -12.0, -_lift - (66.0 if subtle else 70.0))
+
+
+## Замена углей щипцами: старые угольки по одному переносят на лоток и остывают,
+## свежие раскалённые с лотка кладут в чашу. Корутина: завершается, когда на кальяне свежие угли.
+func play_coal_swap(seconds: float) -> void:
+	var step := maxf(seconds / 7.0, 0.1)
+	var bowl_slots := _bowl_slots(Vector2(0.0, -58.0 * HookahArt.SCALE))
+	var tray_old: Array = [Vector2(40, 4), Vector2(44, 3), Vector2(48, 4)]
+	var tray_new: Array = [Vector2(42, 8), Vector2(46, 7), Vector2(50, 8)]
+	var old_heat: float = {0: 0.05, 1: 0.8, 2: 1.0, 3: 0.0}.get(_coal_state, 0.8)
+	_hookah_top = 1
+	_fx_tray = true
+	_fx_tray_pos = Vector2(45, 6)
+	var old: Array = []
+	for slot: Vector2 in bowl_slots:
+		old.append({"pos": slot, "heat": old_heat, "alpha": 1.0})
+	_fx_coals = old.duplicate()
+	var fresh: Array = []
+	for slot: Vector2 in tray_new:
+		fresh.append({"pos": slot, "heat": 0.0, "alpha": 0.0})
+	_fx_coals.append_array(fresh)
+	_tongs_on = true
+	_tongs_pos = Vector2(52, -12)
+	queue_redraw()
+	# Свежие угли разгораются на лотке, пока снимают старые.
+	_ignite(fresh, step * 3.0)
+	for i in old.size():
+		await _tongs_move(old[i]["pos"], step * 0.5)
+		await _tongs_carry(old[i], tray_old[i], step * 0.5)
+		old[i]["heat"] = minf(float(old[i]["heat"]), 0.1)
+	for i in fresh.size():
+		await _tongs_move(fresh[i]["pos"], step * 0.5)
+		await _tongs_carry(fresh[i], bowl_slots[i], step * 0.5)
+	_coal_state = 1
+	_hookah_top = 2
+	_fx_coals.clear()
+	_fx_tray = false
+	await _tongs_move(Vector2(52, -14), step * 0.4)
+	_tongs_on = false
+	queue_redraw()
+	await get_tree().create_timer(0.2).timeout
+
+
 func hookah_top() -> int:
 	return _hookah_top
 
 
-## Забивка: чаша лежит рядом, в неё кладут угли, затем чашу ставят на кальян.
-## Корутина: завершается, когда на кальяне стоит чаша с углями.
+## Забивка: чаша лежит рядом, угольки разгораются на лотке, щипцами их кладут в чашу,
+## затем чашу поднимают и ставят на кальян. Корутина: завершается, когда на кальяне стоит чаша с углями.
 func play_pack_sequence() -> void:
 	_hookah_top = 0
 	_loose_visible = true
 	_loose_coals = false
-	_loose_pos = Vector2(24.0, 2.0)
+	_loose_pos = Vector2(22.0, 2.0)
+	_fx_tray = true
+	_fx_tray_pos = Vector2(46, 6)
+	var tray_slots: Array = [Vector2(42, 4), Vector2(46, 3), Vector2(50, 4)]
+	_fx_coals.clear()
+	for slot: Vector2 in tray_slots:
+		_fx_coals.append({"pos": slot, "heat": 0.0, "alpha": 0.0})
+	_tongs_on = true
+	_tongs_pos = Vector2(54, -12)
 	queue_redraw()
-	await get_tree().create_timer(0.7).timeout
+	await _ignite(_fx_coals, 1.0)
+	var bowl_slots := _bowl_slots(_loose_pos)
+	for i in _fx_coals.size():
+		await _tongs_move(_fx_coals[i]["pos"], 0.25)
+		await _tongs_carry(_fx_coals[i], bowl_slots[i], 0.5)
 	_loose_coals = true
-	queue_redraw()
-	await get_tree().create_timer(0.9).timeout
-	var target := Vector2(0.0, -58.0 * HookahArt.SCALE)
-	var tween := create_tween()
-	tween.tween_method(func(t: float) -> void:
-		_loose_pos = Vector2(24.0, 2.0).lerp(target, t) + Vector2(0.0, -10.0 * sin(t * PI))
-		queue_redraw(), 0.0, 1.0, 0.6).set_trans(Tween.TRANS_SINE)
-	await tween.finished
-	_loose_visible = false
-	_hookah_top = 2
+	_fx_coals.clear()
+	_fx_tray = false
+	await _tongs_move(Vector2(54, -14), 0.25)
+	_tongs_on = false
 	queue_redraw()
 	await get_tree().create_timer(0.3).timeout
+	# Чашу поднимают, переносят над кальяном и опускают на него.
+	var start := _loose_pos
+	var target := Vector2(0.0, -58.0 * HookahArt.SCALE)
+	var up := Vector2(start.x, start.y - 22.0)
+	var over := Vector2(0.0, target.y - 22.0)
+	await _fx_tween(0.4, func(t: float) -> void:
+		_loose_pos = start.lerp(up, t)
+		queue_redraw())
+	await _fx_tween(0.5, func(t: float) -> void:
+		_loose_pos = up.lerp(over, t)
+		queue_redraw())
+	await _fx_tween(0.35, func(t: float) -> void:
+		_loose_pos = over.lerp(target, t)
+		queue_redraw())
+	_loose_visible = false
+	_hookah_top = 2
+	_puff_pos = target + Vector2(0.0, -7.0)
+	queue_redraw()
+	await _fx_tween(0.6, func(t: float) -> void:
+		_puff_t = t
+		queue_redraw())
+	_puff_t = -1.0
+	queue_redraw()
+
+
+## Три места для угольков на чаше (p — точка под дном чаши).
+func _bowl_slots(p: Vector2) -> Array:
+	var y := p.y - 9.0 * HookahArt.SCALE
+	return [Vector2(p.x - 1.9, y), Vector2(p.x + 1.9, y), Vector2(p.x, y - 1.7)]
+
+
+## Угольки на лотке разгораются (серый → оранжевый), проявляясь по очереди.
+func _ignite(coals: Array, seconds: float) -> void:
+	await _fx_tween(seconds, func(t: float) -> void:
+		for i in coals.size():
+			var k := clampf(t * 1.6 - float(i) * 0.2, 0.0, 1.0)
+			coals[i]["alpha"] = minf(k * 3.0, 1.0)
+			coals[i]["heat"] = k
+		queue_redraw())
+
+
+func _fx_tween(seconds: float, step_fn: Callable) -> void:
+	var tween := create_tween()
+	tween.tween_method(step_fn, 0.0, 1.0, maxf(seconds, 0.01)).set_trans(Tween.TRANS_SINE)
+	await tween.finished
+
+
+func _tongs_move(to: Vector2, seconds: float) -> void:
+	var from := _tongs_pos
+	_tongs_open = 2.2
+	await _fx_tween(seconds, func(t: float) -> void:
+		_tongs_pos = from.lerp(to, t)
+		queue_redraw())
+
+
+## Щипцы несут угольок дугой в новую точку.
+func _tongs_carry(coal: Dictionary, to: Vector2, seconds: float) -> void:
+	var from: Vector2 = coal["pos"]
+	_tongs_open = 0.4
+	await _fx_tween(seconds, func(t: float) -> void:
+		var p := from.lerp(to, t) + Vector2(0.0, -8.0 * sin(t * PI))
+		coal["pos"] = p
+		_tongs_pos = p
+		queue_redraw())
+	coal["pos"] = to
+	_tongs_pos = to
+	_tongs_open = 2.2
+
+
+func _draw_coal_fx(origin: Vector2) -> void:
+	if _fx_tray:
+		var tray := PackedVector2Array()
+		for k in 16:
+			var a := TAU * float(k) / 16.0
+			tray.append(origin + _fx_tray_pos + Vector2(cos(a) * 10.0, sin(a) * 4.0))
+		draw_colored_polygon(tray, Color("#6b6f78"))
+		for k in 16:
+			var a := TAU * float(k) / 16.0
+			tray[k] = origin + _fx_tray_pos + Vector2(cos(a) * 8.0, sin(a) * 3.0 - 0.6)
+		draw_colored_polygon(tray, Color("#2e3036"))
+	for coal: Dictionary in _fx_coals:
+		var pos: Vector2 = origin + (coal["pos"] as Vector2)
+		var heat := float(coal["heat"])
+		var alpha := float(coal["alpha"])
+		if alpha <= 0.0:
+			continue
+		if heat > 0.3:
+			draw_circle(pos, 3.6 * heat, Color(1.0, 0.55, 0.15, 0.25 * alpha * heat))
+		var col := Color("#5a5a60").lerp(Color("#ff7a2a"), heat)
+		col.a = alpha
+		draw_colored_polygon(PackedVector2Array([pos + Vector2(-1.6, -1.2), pos + Vector2(1.6, -1.2), pos + Vector2(1.9, 1.1), pos + Vector2(-1.9, 1.1)]), col)
+		if heat > 0.5:
+			draw_circle(pos + Vector2(0.0, -0.3), 0.6, Color(1.0, 0.85, 0.5, alpha))
+	if _tongs_on:
+		var tip := origin + _tongs_pos
+		var hinge := tip + Vector2(7.0, -10.0)
+		var metal := Color("#c4c7ce")
+		draw_line(tip + Vector2(-_tongs_open, 0.0), hinge, metal, 1.1)
+		draw_line(tip + Vector2(_tongs_open, 0.0), hinge, metal, 1.1)
+		draw_line(hinge, hinge + Vector2(4.0, -7.0), Color("#7a7d85"), 1.6)
+		draw_line(hinge, hinge + Vector2(9.0, -4.0), Color("#7a7d85"), 1.6)
+	if _puff_t >= 0.0:
+		for k in 3:
+			var q := Vector2(float(k - 1) * 3.0, -_puff_t * 12.0 - float(k))
+			draw_circle(origin + _puff_pos + q, 1.4 + _puff_t * 2.2, Color(0.85, 0.85, 0.88, 0.5 * (1.0 - _puff_t)))
 
 
 ## Точка на столе под колбой (в координатах родителя) и точка клапана, куда подключается шланг.

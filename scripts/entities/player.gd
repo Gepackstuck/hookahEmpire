@@ -327,6 +327,20 @@ func look_straight() -> void:
 	_figure.view = CharacterFigure.VIEW_SIDE
 
 
+## Жест на месте (idle): "scrub", "read", "pat", "think", "drink", "juggle"; clear_gesture — убрать.
+func set_gesture(gesture_name: String, colors: Array = []) -> void:
+	_figure.set_gesture(gesture_name, colors)
+
+
+func clear_gesture() -> void:
+	_figure.gesture = ""
+
+
+## Наклон предмета в руках (рад), чтобы им «покачивали».
+func set_carried_rotation(value: float) -> void:
+	_carried.rotation = value
+
+
 func is_idle() -> bool:
 	return not _figure.moving and not _figure.holding and not _figure.puffing
 
@@ -362,6 +376,14 @@ func walk_path(path: Array[Vector2], speed: float = SPEED_CELLS_PER_SEC) -> void
 	_auto_walking = true
 
 
+## Прерывает автоматическую ходьбу на месте (ждущие auto_walk_finished корутины продолжаются).
+func cancel_auto_walk() -> void:
+	if not _auto_walking:
+		return
+	_auto_walking = false
+	auto_walk_finished.emit()
+
+
 func _process(delta: float) -> void:
 	_figure.moving = false
 	_process_movement(delta)
@@ -373,7 +395,7 @@ func _process_movement(delta: float) -> void:
 		_figure.moving = true
 		var previous_x := position.x
 		var previous_y := position.y
-		var finished := _auto_walker.step(minf(delta, MAX_FRAME_DELTA))
+		var finished := _auto_walker.step(minf(delta, MAX_FRAME_DELTA * maxf(Engine.time_scale, 1.0)))
 		grid_position = _auto_walker.position
 		position = IsoProjection.grid_to_screen(grid_position)
 		var dx := position.x - previous_x

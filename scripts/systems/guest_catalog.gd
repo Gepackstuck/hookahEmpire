@@ -100,13 +100,30 @@ static func load_guest(guest_id: String) -> Dictionary:
 ## Случайный заказ гостя: {"id", "text", "preferences", "dislikes"?}. Без списка orders — заказ по умолчанию из
 ## preferences. Гость с random_taste каждый раз придумывает вкус заново и старается отличаться от avoid
 ## (предпочтения предыдущего гостя {dim: вес}).
-static func roll_order(guest: Dictionary, rng: RandomNumberGenerator, avoid: Dictionary = {}) -> Dictionary:
+static func roll_order(guest: Dictionary, rng: RandomNumberGenerator, avoid: Dictionary = {}, used_texts: Array = []) -> Dictionary:
 	if guest.has("random_taste"):
-		return _random_order(guest["random_taste"], rng, avoid)
+		# Тот же вкус, что гость уже заказывал, не повторяем (несколько попыток, потом берём что выпало).
+		var order := _random_order(guest["random_taste"], rng, avoid)
+		for attempt in 12:
+			if not used_texts.has(str(order["text"])):
+				break
+			order = _random_order(guest["random_taste"], rng, avoid)
+		return order
 	var orders: Array = guest.get("orders", [])
 	if orders.is_empty():
 		return {"id": "default", "text": "Сделай мне кальян на свой вкус.", "preferences": guest.get("preferences", {})}
-	return orders[rng.randi_range(0, orders.size() - 1)]
+	# Из заказов, которых у гостя ещё не было; когда список исчерпан — начинаем заново (но не тот же подряд).
+	var fresh: Array = []
+	for candidate in orders:
+		if not used_texts.has(str(candidate.get("text", ""))):
+			fresh.append(candidate)
+	if fresh.is_empty():
+		for candidate in orders:
+			if used_texts.is_empty() or str(candidate.get("text", "")) != str(used_texts[used_texts.size() - 1]):
+				fresh.append(candidate)
+	if fresh.is_empty():
+		fresh = orders
+	return fresh[rng.randi_range(0, fresh.size() - 1)]
 
 
 ## Случайный контрастный вкус: основное измерение и (случайно) второе — не из avoid;

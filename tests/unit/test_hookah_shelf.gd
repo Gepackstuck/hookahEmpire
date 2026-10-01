@@ -19,13 +19,14 @@ func _drop(shelf: GarageObject) -> void:
 	shelf.free()
 
 
-func test_shelf_has_three_hookahs() -> void:
+func test_shelf_has_four_hookahs() -> void:
 	var shelf := _make_shelf()
-	assert_eq(shelf.hookah_slot_count(), 3)
-	assert_eq(shelf.free_hookah_slots().size(), 3)
+	assert_eq(shelf.hookah_slot_count(), 4)
+	assert_eq(shelf.free_hookah_slots().size(), 4)
 	assert_eq(shelf.hookah_slot_color(0), Color("#22b8ff"))
 	assert_eq(shelf.hookah_slot_color(1), Color("#ff7a1a"))
 	assert_eq(shelf.hookah_slot_color(2), Color("#7bd62f"))
+	assert_eq(shelf.hookah_slot_color(3), Color("#ff4f9a"))
 	shelf.restock_hookahs()
 	assert_eq(shelf.hookah_slot_color(0), Color("#22b8ff"), "цвета на полке всегда одинаковые")
 	_drop(shelf)
@@ -36,11 +37,11 @@ func test_take_hookah_empties_only_that_slot() -> void:
 	var color := shelf.hookah_slot_color(1)
 	shelf.take_hookah(1)
 	assert_true(shelf.is_hookah_slot_taken(1))
-	assert_eq(shelf.free_hookah_slots().size(), 2)
+	assert_eq(shelf.free_hookah_slots().size(), 3)
 	assert_true(not shelf.free_hookah_slots().has(1))
 	assert_eq(color, Color("#ff7a1a"))
 	shelf.restock_hookahs()
-	assert_eq(shelf.free_hookah_slots().size(), 3, "после пополнения все слоты заняты")
+	assert_eq(shelf.free_hookah_slots().size(), 4, "после пополнения все слоты заняты")
 	_drop(shelf)
 
 

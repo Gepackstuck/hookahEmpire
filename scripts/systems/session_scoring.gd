@@ -136,6 +136,18 @@ func evaluate(taste: Dictionary, recipe: Dictionary, execution_score: float, cat
 	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(trend_id))
 
 
+## Пересчёт готового итога со штрафами (жар, redo): компоненты берутся из итога, поля гостя/рецепта сохраняются.
+func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 0.0) -> Dictionary:
+	var components := {}
+	for key in COMPONENTS:
+		components[key] = float(verdict.get(key, 0.0))
+	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")))
+	for key in ["guest_id", "recipe_id", "phrase"]:
+		if verdict.has(key):
+			result[key] = verdict[key]
+	return result
+
+
 ## Собирает итог из компонентов (отдельно от evaluate — для детерминированных тестов).
 func build_result(components: Dictionary, heat_penalty: float = 0.0, service_penalty: float = 0.0, profile: Dictionary = {}, trend_label: String = "") -> Dictionary:
 	var context := context_score(components)

@@ -138,6 +138,16 @@ func record_session(recipe_id: String, final_score: float, guest_id: String, pay
 	return true
 
 
+## M7: итог последней сессии уточнён штрафами (жар, redo) — обновляем «последний результат» без нового сеанса.
+func revise_last(recipe_id: String, final_score: float, payment: int) -> void:
+	if not _state.recipes.has(recipe_id):
+		return
+	var recipe: Dictionary = _state.recipes[recipe_id]
+	recipe["last_final"] = final_score
+	recipe["last_payment"] = payment
+	recipe_updated.emit(recipe_id)
+
+
 ## Состав для карточек: "Клубника 50% · Ваниль 50%" (+ "Ледяная нотка ❄️").
 func composition_text(recipe: Dictionary) -> String:
 	var parts: PackedStringArray = []

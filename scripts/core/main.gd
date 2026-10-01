@@ -19,6 +19,21 @@ var _manual_screen: ManualPreparationScreen = null
 var _scoring: SessionScoring = null
 var _summary: SessionSummaryScreen = null
 var _viewer: ImageViewer = null
+## M7: жар кальяна, замена углей, перезабивка (redo).
+var _heat: HeatModel = null
+var _heat_active := false
+var _session_token := 0
+var _session_puffs := 0
+var _session_guest_id := ""
+var _pace_timer := 0.0
+var _complaint_timer := 0.0
+var _npc_service_pending := false
+var _servicing := false
+var _redoing := false
+var _redo_requested := false
+var _redo_used := false
+var _redo_timer := 0.0
+var _service_penalty := 0.0
 var _station := HookahStation.new()
 var _order: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
@@ -34,6 +49,11 @@ var _puffs_until_ask := 0
 var _last_order_prefs: Dictionary = {}
 ## Гость попрощался и уходит: стол и кальян недоступны.
 var _guest_departing := false
+## guest_id -> тексты заказов, которые гость уже делал (чтобы заказы не повторялись и книга рецептов росла).
+var _used_orders: Dictionary = {}
+var _stats := PlaytestStats.new()
+var _stats_panel: StatsPanel = null
+var _stats_button: Button = null
 var _pending_serve := false
 var _book_from_mixer := false
 var _carrying := false
@@ -72,9 +92,11 @@ func _ready() -> void:
 
 	_add_debug_button()
 	_add_volume_slider()
+	_add_stats_panel()
 	_add_objective_label()
 	_garage.friend_arrived.connect(_on_friend_arrived)
 	_garage.friend_inhaled.connect(_on_friend_inhaled)
+	_garage.player_inhaled.connect(_on_player_inhaled)
 	_garage.message_requested.connect(_notify)
 	_garage.dialogue_requested.connect(_on_dialogue_requested)
 	_garage.action_requested.connect(_on_action_requested)
@@ -98,6 +120,9 @@ func _ready() -> void:
 		_book.setup(_recipes)
 		_mixer.recipe_committed.connect(_on_recipe_committed)
 		_scoring = SessionScoring.load_default()
+		_heat = HeatModel.load_default()
+		for message in _heat.errors:
+			GameLog.error("heat", message)
 		for message in _scoring.errors:
 			GameLog.error("scoring", message)
 		_preparation = PreparationService.create(_recipes)
@@ -151,7 +176,15 @@ func _on_friend_arrived(guest_id: String) -> void:
 		var guest := GuestCatalog.load_guest(guest_id)
 		if not guest.is_empty():
 			_rng.randomize()
-			_order = GuestCatalog.roll_order(guest, _rng, _last_order_prefs)
+			var used: Array = _used_orders.get(guest_id, [])
+			_order = GuestCatalog.roll_order(guest, _rng, _last_order_prefs, used)
+			# Список «уже было» у гостя: когда он заказал всё, начинаем сначала.
+			if used.size() >= int(guest.get("orders", []).size()) and guest.has("orders"):
+				used = []
+			used.append(str(_order["text"]))
+			while used.size() > 8:
+				used.pop_front()
+			_used_orders[guest_id] = used
 			_last_order_prefs = _order["preferences"]
 			GameLog.info("guests", "Заказ %s: %s %s" % [guest_id, str(_order["id"]), str(_order["preferences"])])
 			if _recipes != null:
@@ -208,6 +241,8 @@ func _on_manual_served(result: Dictionary) -> void:
 
 
 func _on_friend_inhaled(_guest_id: String) -> void:
+	_session_puffs += 1
+	_heat_puff()
 	if not _ask_blocked:
 		return
 	_puffs_until_ask -= 1
@@ -250,6 +285,7 @@ func _on_dialogue_requested(dialogue_id: String) -> void:
 		return
 	# Подошли к гостю: если в коробке мало мундштуков, кальянщик докладывает новые.
 	if dialogue_id.begins_with("friend_") and not _autopilot and _garage.top_up_mouthpieces(2):
+		_stats.bump("mouthpiece_refill")
 		_notify("Кальянщик докладывает мундштуки в коробку.")
 	var dialogue := _library.get_dialogue(dialogue_id)
 	if not dialogue.is_empty() and not _order.is_empty():
@@ -332,6 +368,10 @@ func _on_action_requested(action_id: String) -> void:
 		"open_recipe_book":
 			_book_from_mixer = false
 			_book.open()
+		"replace_coals":
+			await _replace_coals()
+		"redo_hookah":
+			await _do_redo()
 		_:
 			GameLog.error("main", "Неизвестное действие: %s" % action_id)
 	_update_input_lock()
@@ -395,6 +435,7 @@ func _on_preparation_closed() -> void:
 		_pending_verdict = {}
 		_last_verdict = verdict
 		var guest_id := str(verdict["guest_id"])
+		_start_heat(guest_id)
 		# Гость сначала делает 3–5 затяжек и только потом выдаёт реакцию.
 		_garage.set_friend_smoking(guest_id, true, "")
 		await _garage.wait_for_friend_puffs(guest_id, randi_range(3, 5))
@@ -511,14 +552,18 @@ func _show_summary(guest_id: String, verdict: Dictionary) -> void:
 ## встаёт, уходит через дверь; стол освобождается, через паузу приходит следующий гость.
 func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	var guest := GuestCatalog.load_guest(guest_id)
+	var token := _session_token
+	# Гость курит, пока идёт жар/обслуживание; он может попросить перезабить (тогда сессию продолжит новая подача).
+	verdict = await _run_smoking_phase(guest_id, verdict, token)
+	if token != _session_token:
+		return
 	var payment := int(verdict["payment"])
 	var likes := bool(verdict["likes"])
 	session_finished.emit({
 		"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]),
 		"band_id": str(verdict["band_id"]), "payment": payment, "reputation_delta": int(verdict["reputation_delta"])})
+	_stats.record_session({"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]), "band_id": str(verdict["band_id"]), "payment": payment})
 	GameLog.info("session", "%s: %.1f (%s), оплата %d" % [guest_id, float(verdict["final_score"]), str(verdict["band_id"]), payment])
-	if likes:
-		await _garage.wait_for_friend_puffs(guest_id, randi_range(6, 12))
 	_garage.set_friend_smoking(guest_id, false)
 	await _wait_until_free()
 	_rng.randomize()
@@ -526,6 +571,9 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 		var line := GuestCatalog.farewell_text(guest, str(verdict["emotion_id"]), likes, payment, _rng)
 		await _play_lines(guest, [["guest", line]])
 	_guest_departing = true
+	_redo_used = false
+	_redo_requested = false
+	_service_penalty = 0.0
 	_station.reset()
 	_last_verdict = {}
 	_smoke_permission = false
@@ -535,8 +583,17 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	_order = {}
 	_mixer.set_order_hint("")
 	var progress: String = _state.story_progress
-	if progress.ends_with("_intro_done"):
+	# Гость обслужен: заказ снова неизвестен (при следующем визите он опять сделает заказ),
+	# а сюжет переходит к «обслужен» даже если разговор при визите был пропущен.
+	_state.set_flag("%s_order_known" % guest_id.trim_prefix("friend_"), false)
+	if _beats != null and _beats.is_in_progress_of(guest_id, progress):
+		_state.set_story_progress(_beats.done_progress_for(guest_id))
+	elif progress.ends_with("_intro_done"):
 		_state.set_story_progress(progress.replace("_intro_done", "_done"))
+	# Гости ходят по кругу: после последнего (Макс) снова приходит первый (Ден).
+	if _state.story_progress == LOOP_END_PROGRESS and _beats != null and _beats.find_for_progress(LOOP_RESTART_PROGRESS).size() > 0:
+		_state.set_story_progress(LOOP_RESTART_PROGRESS)
+		_stats.bump("guest_cycles")
 	_guest_departing = false
 	_apply_station()
 	# Новый гость приходит и садится, пока кальянщик моет кальян и убирает его на полку.
@@ -549,6 +606,211 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	_update_input_lock()
 	_apply_station()
 	_refresh_objective()
+
+
+# --- M7: жар, замена углей, перезабивка ------------------------------------------------------
+
+func _ui_paused() -> bool:
+	return _runner.is_active or _mixer.visible or _book.visible or _preparation_screen.visible \
+		or (_manual_screen != null and _manual_screen.visible) or (_summary != null and _summary.visible) \
+		or (_viewer != null and _viewer.visible)
+
+
+func _start_heat(guest_id: String) -> void:
+	if _heat == null:
+		return
+	_session_guest_id = guest_id
+	_session_puffs = 0
+	_heat.begin(_heat.roll_npc_pace(_rng) if _autopilot else -1.0)
+	_pace_timer = _heat.roll_pace_interval(_rng)
+	_complaint_timer = _heat.complaint_cooldown
+	_npc_service_pending = false
+	_heat_active = true
+	_sync_heat_visual()
+	_apply_station()
+
+
+func _stop_heat() -> void:
+	_heat_active = false
+	_npc_service_pending = false
+	_garage.set_hookah_heat(1, "")
+	_apply_station()
+
+
+func _heat_puff() -> void:
+	if _heat == null or not _heat_active:
+		return
+	var changed := _heat.puff()
+	if changed != "":
+		_on_heat_state_changed(changed)
+
+
+func _on_player_inhaled() -> void:
+	_heat_puff()
+
+
+## Жар меняется со временем; жалобы гостя и штраф зависят от состояния кальяна.
+func _tick_session(delta: float) -> void:
+	if _redo_requested and not _ui_paused() and _heat != null:
+		_redo_timer -= delta
+		if _redo_timer <= 0.0:
+			_redo_requested = false
+			_redo_used = true
+			_service_penalty += _heat.redo_ignored
+			_garage.say(_session_guest_id, "Ладно, не надо... Но осадочек остался.")
+			_apply_station()
+	if _heat == null or not _heat_active or _ui_paused() or _servicing:
+		return
+	if _autopilot:
+		# Режим NPC: темп то «суета», то «спокойствие».
+		_pace_timer -= delta
+		if _pace_timer <= 0.0:
+			_heat.pace = _heat.roll_npc_pace(_rng)
+			_pace_timer = _heat.roll_pace_interval(_rng)
+	var changed := _heat.tick(delta)
+	if changed != "":
+		_on_heat_state_changed(changed)
+	_complaint_timer -= delta
+	if _heat.needs_service() and _complaint_timer <= 0.0:
+		_complain()
+
+
+func _on_heat_state_changed(new_state: String) -> void:
+	_sync_heat_visual()
+	_apply_station()
+	if new_state != HeatModel.STATE_NORMAL:
+		_stats.bump("heat_" + new_state)
+		_complain()
+
+
+## Гость жалуется на жар; автопилот замечает жалобу не всегда (иногда «забывает»).
+func _complain() -> void:
+	if _heat == null:
+		return
+	_stats.bump("complaints")
+	_complaint_timer = _heat.complaint_cooldown
+	var line := _heat.random_line(_heat.state, _rng)
+	if line != "":
+		_garage.say(_session_guest_id, line)
+	if _autopilot and _rng.randf() < _heat.npc_notice_chance:
+		_npc_service_pending = true
+
+
+func _sync_heat_visual() -> void:
+	if _heat == null or not _heat_active:
+		_garage.set_hookah_heat(1, "")
+		return
+	var coal := 1
+	var badge := ""
+	match _heat.state:
+		HeatModel.STATE_COLD:
+			coal = 0
+			badge = "🧊"
+		HeatModel.STATE_HOT:
+			coal = 2
+			badge = "🔥"
+		HeatModel.STATE_BURNED:
+			coal = 3
+			badge = "💀"
+	# В режиме NPC эмодзи тоже виден, но мельче и полупрозрачный.
+	_garage.set_hookah_heat(coal, badge, _autopilot)
+
+
+## Замена углей: кальянщик подходит к кальяну гостя, меняет угли; жар возвращается к норме.
+func _replace_coals() -> void:
+	if _servicing or _heat == null or not _heat_active:
+		return
+	_servicing = true
+	_carrying = true
+	_stats.bump("coal_service")
+	if _autopilot:
+		_stats.bump("coal_service_npc")
+	_update_input_lock()
+	_apply_station()
+	await _garage.service_coals(_heat.service_seconds)
+	_servicing = false
+	_carrying = false
+	if _heat_active:
+		_heat.service()
+		_npc_service_pending = false
+		_complaint_timer = _heat.complaint_cooldown
+		_sync_heat_visual()
+		var line := _heat.random_line("thanks", _rng)
+		if line != "":
+			_garage.say(_session_guest_id, line)
+	_apply_station()
+	_update_input_lock()
+
+
+## Гость попросил перезабить: кальянщик забирает кальян на стол для кальянов, и приготовление идёт заново.
+func _request_redo(guest_id: String) -> void:
+	if _heat == null:
+		return
+	_stats.bump("redo_requested")
+	_redo_requested = true
+	_redo_timer = _heat.redo_timeout
+	_garage.say(guest_id, _heat.random_line("redo", _rng))
+	_notify("%s просит перезабить кальян." % str(GuestCatalog.load_guest(guest_id).get("name", "Гость")))
+	_apply_station()
+
+
+func _do_redo() -> void:
+	if not _redo_requested or _servicing or _redoing or _heat == null:
+		return
+	_stats.bump("redo")
+	_redoing = true
+	_redo_requested = false
+	_redo_used = true
+	_service_penalty += _heat.redo_cost
+	_session_token += 1
+	_carrying = true
+	_update_input_lock()
+	_stop_heat()
+	var guest_id := _session_guest_id
+	_garage.set_friend_smoking(guest_id, false)
+	_garage.say("player", "Сейчас перезабью.")
+	await _garage.carry_hookah_to_prep_table()
+	_hookah_on_prep_table = true
+	_station.reset()
+	_last_verdict = {}
+	_smoke_permission = false
+	_ask_blocked = false
+	_carrying = false
+	_redoing = false
+	_apply_station()
+	_update_input_lock()
+	_refresh_objective()
+
+
+## Курение гостя после реакции: считает затяжки, ведёт запрос redo и в конце применяет штраф за жар.
+## Возвращает итог (с учётом штрафов); если пришла перезабивка (token сменился) — исходный итог.
+func _run_smoking_phase(guest_id: String, verdict: Dictionary, token: int) -> Dictionary:
+	var likes := bool(verdict["likes"])
+	_session_puffs = 0
+	var goal := randi_range(6, 12) if likes else 0
+	var redo_at := -1
+	if _heat != null and not _redo_used and _rng.randf() < _heat.redo_chance:
+		# Просить перезабить можно только в течение 4–7 затяжек после оценки; курим как минимум до запроса.
+		redo_at = 0 if goal == 0 else randi_range(_heat.redo_min_puff, _heat.redo_max_puff)
+		goal = maxi(goal, redo_at + 1)
+	while token == _session_token:
+		if redo_at >= 0 and not _redo_requested and not _redo_used and _session_puffs >= redo_at:
+			_request_redo(guest_id)
+		if _session_puffs >= goal and not _redo_requested and not _servicing and not _redoing:
+			break
+		await get_tree().process_frame
+	if token != _session_token:
+		return verdict
+	var heat_penalty := _heat.heat_penalty() if _heat != null else 0.0
+	_stop_heat()
+	if (heat_penalty > 0.04 or _service_penalty > 0.0) and _scoring != null:
+		var revised := _scoring.rescore(verdict, heat_penalty, _service_penalty)
+		_recipes.revise_last(str(revised.get("recipe_id", "")), float(revised["final_score"]), int(revised["payment"]))
+		_last_verdict = revised
+		_notify("Штраф: жар −%.1f, перезабивка −%.1f. Итог %.1f, оплата %d." % [heat_penalty, _service_penalty, float(revised["final_score"]), int(revised["payment"])])
+		GameLog.info("session", "Штрафы: жар %.1f, сервис %.1f → %.1f" % [heat_penalty, _service_penalty, float(revised["final_score"])])
+		return revised
+	return verdict
 
 
 ## Ждёт, пока игрок закончит диалог/закроет окна (чтобы прощание не легло поверх них).
@@ -566,6 +828,10 @@ func _apply_station() -> void:
 		_garage.configure_interaction("table_hookah", "", "", "", "", false)
 	if _guest_departing:
 		_garage.configure_interaction("table_guest", "", "", "", "", false)
+	elif _redo_requested:
+		_garage.configure_interaction("table_guest", "Перезабить кальян", "redo_hookah")
+	elif _heat_active and _heat != null and _heat.needs_service():
+		_garage.configure_interaction("table_guest", "Заменить угли", "replace_coals")
 	elif _station.can_smoke() and (_smoke_permission or _station.guest_id == ""):
 		_garage.configure_interaction("table_guest", "Покурить", "smoke_hookah", _station.player_emoji(), _station.message())
 	elif _station.can_smoke() and not _ask_blocked:
@@ -636,6 +902,9 @@ func _set_autopilot(on: bool) -> void:
 		_autopilot_button.modulate = Color(0.55, 1.0, 0.6) if on else Color.WHITE
 	# Режим NPC: камера по умолчанию следует за кальянщиком (кнопка 🎥 отключает следование и ставит камеру по центру); вручную — как раньше.
 	_camera_follow = true
+	if _heat != null and _heat_active:
+		_heat.pace = _heat.roll_npc_pace(_rng) if on else _heat.pace_manual
+	_sync_heat_visual()
 	if _camera_button != null:
 		_camera_button.disabled = not on
 		_camera_button.set_pressed_no_signal(on)
@@ -681,6 +950,12 @@ func _autopilot_step() -> void:
 	if _carrying or _guest_departing or _runner.is_active or _mixer.visible or _book.visible \
 			or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _summary.visible:
 		return
+	if _redo_requested:
+		await _do_redo()
+		return
+	if _heat_active and _npc_service_pending and _heat != null and _heat.needs_service():
+		await _replace_coals()
+		return
 	var guest_id := _garage.ready_friend_id()
 	if not _autopilot_needs_action():
 		# Делать нечего (гость курит или ждём нового): изображаем работу у объектов гаража.
@@ -701,14 +976,33 @@ const IDLE_TARGETS := {
 	"table_test": ["🧪", "🍓", "🍋", "❄️"],
 	"shelf_hookah": ["📦", "🔍", "🧐"],
 	"recipe_book": ["📖", "🤔", "✍️"],
+	"sign_neon": ["💡", "🤨", "🔧"],
 }
-const IDLE_MIN_SECONDS := 3.0
-const IDLE_MAX_SECONDS := 6.0
+## Что кальянщик делает у объекта (выбирается случайно, шансы равные): действие -> эмодзи над головой.
+## Анимации — в GarageWorld.play_idle_action.
+## Вес действия при выборе (по умолчанию 1): перестановка кальянов чуть чаще остальных.
+const IDLE_WEIGHTS := {"swap": 2.0}
+const IDLE_ACTIONS := {
+	"sink_wash": {"wash": ["💦", "🫧", "🧽"], "gaze": ["💧", "🤔", "😌"]},
+	"shelf_hookah": {"look_mask": ["🎭", "🧐"], "look_book": ["📕", "🧐"], "swap": ["🔄", "🧐"], "juggle": ["🤹", "✨", "🌿"]},
+	"recipe_book": {"think": ["🤔", "💭"], "read": ["📖", "🧐"]},
+	"sign_neon": {"look": ["💡", "🤨"], "pat": ["🔧", "👋", "🤨"]},
+	"table_hookah": {"stand": ["🔥", "🧰", "💨"], "drink": ["💧", "🥤", "😌"], "juggle": ["🤹", "✨", "🌿"]},
+}
+## Гости приходят по кругу: когда прогресс доходит до LOOP_END_PROGRESS, он сбрасывается на LOOP_RESTART_PROGRESS.
+const LOOP_END_PROGRESS := "friend_02_done"
+const LOOP_RESTART_PROGRESS := "intro_start"
+const IDLE_MIN_SECONDS := 9.0
+const IDLE_MAX_SECONDS := 16.0
+var _idle_walking := false
+var _idle_acting := false
 var _idle_last := ""
 
 
 ## Есть ли у кальянщика реальное дело: новый гость без заказа или заказ, ожидающий кальяна.
 func _autopilot_needs_action() -> bool:
+	if _redo_requested or (_heat_active and _npc_service_pending and _heat != null and _heat.needs_service()):
+		return true
 	if _garage.ready_friend_id() == "":
 		return false
 	if not _order_known():
@@ -725,6 +1019,10 @@ func _autopilot_busy() -> bool:
 ## Один «заход» простоя: идёт к случайному объекту (не к тому же, что в прошлый раз) и 3–6 с делает вид, что работает.
 ## Прерывается, как только появляется настоящее дело.
 func _autopilot_idle() -> void:
+	# Мундштуков в коробке мало — докладываем их прямо в простое, не дожидаясь нового заказа.
+	if _garage.mouthpieces_low(2):
+		await _autopilot_refill_mouthpieces()
+		return
 	var options: Array = []
 	for id in IDLE_TARGETS:
 		if id != _idle_last and _garage.has_object(id):
@@ -735,22 +1033,97 @@ func _autopilot_idle() -> void:
 	_idle_last = target
 	_carrying = true
 	_update_input_lock()
-	await _garage.walk_to_object(target)
+	_idle_walking = true
+	_idle_walk(target)
+	# Идём, но бросаем всё, как только появилось настоящее дело (перезабивка, заказ, угли).
+	while _idle_walking:
+		if not _autopilot or _autopilot_needs_action():
+			_garage.cancel_walk()
+		await get_tree().process_frame
 	_carrying = false
 	_update_input_lock()
+	if not _autopilot or _autopilot_needs_action():
+		return
 	var emojis: Array = IDLE_TARGETS[target]
+	var action := "stand"
+	var actions: Variant = IDLE_ACTIONS.get(target)
+	if actions is Dictionary and not (actions as Dictionary).is_empty():
+		action = _pick_idle_action(actions as Dictionary)
+		emojis = (actions as Dictionary)[action]
 	var duration := randf_range(IDLE_MIN_SECONDS, IDLE_MAX_SECONDS)
 	var elapsed := 0.0
 	var next_emoji := 0.0
-	_garage.set_idle_work(target, true)
-	while elapsed < duration and _autopilot and not _autopilot_busy() and not _autopilot_needs_action():
-		if elapsed >= next_emoji:
+	_stats.bump("idle_" + action)
+	_idle_acting = true
+	_idle_act(target, action, duration)
+	while _idle_acting:
+		if _autopilot_idle_should_stop():
+			# Ходьба внутри действия (например, перестановка кальянов) прерывается сразу.
+			_garage.cancel_walk()
+		elif elapsed >= next_emoji:
 			_garage.set_chips("player", [{"emoji": str(emojis.pick_random()), "state": "pick"}])
 			next_emoji += 1.1
-		await get_tree().create_timer(0.2).timeout
-		elapsed += 0.2
-	_garage.set_idle_work(target, false)
+		await get_tree().create_timer(0.1).timeout
+		elapsed += 0.1
 	_garage.clear_chips("player")
+
+
+## Простой: идёт к коробке у стола гостя и докладывает мундштуки (прерывается настоящим делом).
+func _autopilot_refill_mouthpieces() -> void:
+	_carrying = true
+	_update_input_lock()
+	_idle_walking = true
+	_idle_walk_box()
+	while _idle_walking:
+		if _autopilot_idle_should_stop():
+			_garage.cancel_walk()
+		await get_tree().process_frame
+	_carrying = false
+	_update_input_lock()
+	if _autopilot_idle_should_stop():
+		return
+	_garage.say("player", "Докладываю мундштуки в коробку.")
+	var waited := 0.0
+	while waited < 1.4 and not _autopilot_idle_should_stop():
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	if _autopilot_idle_should_stop():
+		return
+	if _garage.top_up_mouthpieces(2):
+		_stats.bump("mouthpiece_refill")
+		_stats.bump("mouthpiece_refill_idle")
+
+
+func _idle_walk_box() -> void:
+	await _garage.walk_to_mouthpiece_box()
+	_idle_walking = false
+
+
+## Выбор действия простоя: по умолчанию шансы равные, у action из IDLE_WEIGHTS — свой вес.
+func _pick_idle_action(actions: Dictionary) -> String:
+	var total := 0.0
+	for key in actions:
+		total += float(IDLE_WEIGHTS.get(key, 1.0))
+	var roll := randf() * total
+	for key in actions:
+		roll -= float(IDLE_WEIGHTS.get(key, 1.0))
+		if roll <= 0.0:
+			return str(key)
+	return str(actions.keys()[0])
+
+
+func _autopilot_idle_should_stop() -> bool:
+	return not _autopilot or _autopilot_busy() or _autopilot_needs_action()
+
+
+func _idle_act(target: String, action: String, duration: float) -> void:
+	await _garage.play_idle_action(target, action, duration, _autopilot_idle_should_stop)
+	_idle_acting = false
+
+
+func _idle_walk(target: String) -> void:
+	await _garage.walk_to_object(target)
+	_idle_walking = false
 
 
 func _autopilot_talk(guest_id: String) -> void:
@@ -767,7 +1140,8 @@ func _autopilot_talk(guest_id: String) -> void:
 			return
 		_garage.say("player", "Докладываю мундштуки в коробку.")
 		await get_tree().create_timer(1.4).timeout
-		_garage.top_up_mouthpieces(2)
+		if _garage.top_up_mouthpieces(2):
+			_stats.bump("mouthpiece_refill")
 	await _garage.walk_to_friend(guest_id)
 	_carrying = false
 	_on_dialogue_requested(dialogue_id)
@@ -895,6 +1269,7 @@ func _clear_wants_badge() -> void:
 
 ## Автопилот «нажимает» за игрока: листает диалоги и закрывает карточку итогов.
 func _process(delta: float) -> void:
+	_tick_session(delta)
 	if not _autopilot:
 		_autopilot_dialogue_timer = 0.0
 		_autopilot_summary_timer = 0.0
@@ -922,6 +1297,8 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F11:
 		_toggle_fullscreen()
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		_toggle_stats_panel()
 	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F9:
 		_debug_reset_hookah()
 	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F10:
@@ -959,8 +1336,8 @@ const DEFAULT_VOLUME_PERCENT := 0.0
 func _add_volume_slider() -> void:
 	var box := HBoxContainer.new()
 	box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	box.offset_left = -410.0
-	box.offset_right = -204.0
+	box.offset_left = -470.0
+	box.offset_right = -264.0
 	box.offset_top = 16.0
 	box.offset_bottom = 68.0
 	box.add_theme_constant_override("separation", 8)
@@ -1033,6 +1410,75 @@ func _add_debug_button() -> void:
 	_camera_button.offset_bottom = 68.0
 	_camera_button.toggled.connect(_on_camera_button_toggled)
 	$UI/Root.add_child(_camera_button)
+
+
+## Кнопка 📊 и окно статистики для ручного тестирования (есть в любой сборке).
+func _add_stats_panel() -> void:
+	_stats_button = Button.new()
+	_stats_button.text = "📊"
+	_stats_button.tooltip_text = "Статистика теста (F8)"
+	_stats_button.focus_mode = Control.FOCUS_NONE
+	_stats_button.add_theme_font_size_override("font_size", 28)
+	_stats_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_stats_button.offset_left = -252.0
+	_stats_button.offset_right = -196.0
+	_stats_button.offset_top = 16.0
+	_stats_button.offset_bottom = 68.0
+	_stats_button.pressed.connect(_toggle_stats_panel)
+	$UI/Root.add_child(_stats_button)
+	_stats_panel = StatsPanel.new()
+	_stats_panel.provider = _stats_lines
+	_stats_panel.reset_requested.connect(func() -> void: _stats.reset())
+	_stats_panel.speed_selected.connect(_set_game_speed)
+	$UI/Root.add_child(_stats_panel)
+	_stats_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_stats_panel.offset_left = -420.0
+	_stats_panel.offset_right = -16.0
+	_stats_panel.offset_top = 76.0
+	_stats_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
+
+## Ускорение всей игры для тестов (Engine.time_scale): таймеры, твины, ходьба, жар, анимации.
+func _set_game_speed(value: float) -> void:
+	Engine.time_scale = clampf(value, 0.1, 10.0)
+	if _stats_panel != null:
+		_stats_panel.show_speed(Engine.time_scale)
+	GameLog.info("test", "Скорость игры ×%.0f" % Engine.time_scale)
+
+
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
+
+func _toggle_stats_panel() -> void:
+	if _stats_panel != null:
+		_stats_panel.toggle()
+
+
+## Строки окна статистики: сначала «живые» значения, затем итоги за запуск.
+func _stats_lines() -> Array[String]:
+	var lines: Array[String] = []
+	lines.append("— СЕЙЧАС —")
+	lines.append("Режим: %s, скорость ×%.0f" % ["NPC (автопилот)" if _autopilot else "ручной", Engine.time_scale])
+	lines.append("Сюжет: %s" % _state.story_progress)
+	var guest_id := _garage.ready_friend_id()
+	var guest_name := str(GuestCatalog.load_guest(guest_id).get("name", guest_id)) if guest_id != "" else "—"
+	lines.append("Гость: %s%s" % [guest_name, " (уходит)" if _guest_departing else ""])
+	lines.append("Заказ: %s" % (str(_order.get("id", "?")) if not _order.is_empty() else "—"))
+	lines.append("Стол: %s" % str(_station.state))
+	if _heat != null and _heat_active:
+		lines.append("Жар: %.0f (%s), темп %.2f, затяжек %d" % [_heat.heat, _heat.state, _heat.pace, _session_puffs])
+		lines.append("Штраф: жар %.1f, сервис %.1f" % [_heat.heat_penalty(), _service_penalty])
+		lines.append("Угли: %s, перезабивка: %s" % ["ждут замены" if (_heat.needs_service() or _npc_service_pending) else "ок", "просит" if _redo_requested else ("использована" if _redo_used else "нет")])
+	else:
+		lines.append("Жар: — (гость не курит)")
+	lines.append("Мундштуков в коробке: %d" % _garage.mouthpiece_count())
+	lines.append("Деньги: %d, репутация: %d" % [_state.money, _state.reputation])
+	lines.append("FPS: %d" % int(Engine.get_frames_per_second()))
+	lines.append("")
+	lines.append("— ЗА ЗАПУСК —")
+	lines.append_array(_stats.summary_lines())
+	return lines
 
 
 func _on_book_from_mixer() -> void:

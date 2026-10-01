@@ -174,3 +174,16 @@ func test_player_camera_follow_toggle() -> void:
 	assert_true(player.is_camera_following())
 	(Engine.get_main_loop() as SceneTree).root.remove_child(player)
 	player.free()
+
+
+func test_figure_gestures_force_profile() -> void:
+	var figure := CharacterFigure.make("player")
+	figure.look_toward(Vector2(0, 60))
+	assert_eq(figure.effective_view(), CharacterFigure.VIEW_FRONT)
+	for gesture_name in ["scrub", "read", "pat", "think", "drink", "juggle"]:
+		figure.set_gesture(gesture_name)
+		assert_eq(figure.effective_view(), CharacterFigure.VIEW_SIDE, "жест '%s' — в профиль" % gesture_name)
+		assert_true(not figure._gesture_pose(Vector2(1, -43), true).is_empty())
+	figure.gesture = ""
+	assert_eq(figure.effective_view(), CharacterFigure.VIEW_FRONT)
+	figure.free()
