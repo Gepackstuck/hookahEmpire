@@ -679,3 +679,10 @@ Gameplay-системы никогда не должны зависеть от �
 - `ManualPreparation` (чистая логика): состояние мини-игры (порции, набивка, натяжение, дырки, угли, розжиг), перевод действий в уровни параметров, подоценка состава, качество расстановки углей, подсказки-ориентиры.
 - `ExecutionScoring.evaluate_levels` — общая оценка по дробным уровням; быстрый режим (`evaluate`) приводит выбор вариантов к уровням и зовёт её. `PreparationService.preview_manual` — то же для ручного режима.
 - UI: `ManualPreparationScreen` (шаги, лоток, история, результат), `BowlView` (рисование чаши и ввод мыши), `DragToken` (перетаскивание), `ManualSfx` (звуки-заглушки). Main создаёт экран кодом и связывает с окном приготовления (`manual_requested` → `suspend` → `served` → `complete_with`).
+
+## M8: тренды, экономика, цель MVP
+
+- `TrendSystem` (`data/config/trends.json` + тренды в `session_scoring.json`) — текущий тренд, отсчёт визитов, авторская ротация; `trend_fit` считает через `SessionScoring`. Состояние хранится в `GameState` (`current_trend_id`, `trend_visits_left`).
+- `EconomySystem` — баланс/репутация поверх `GameState` (`earn`, `spend`, `recipe_cost`, бесплатные ингредиенты, границы репутации; `data/config/economy.json`).
+- `ProgressionGoal` — «сильный рецепт» (`strong_trends` в записи рецепта), прогресс «n/3», флаги `mvp_goal_done` и `mvp_ending_seen`; финальный диалог `mvp_ending`.
+- `StatusHud` — только отображение; `Main` связывает системы (`_setup_m8`, `_apply_session_economy`, `_advance_trend`, `_maybe_play_ending`) и отдаёт экранам провайдеры `cost_info` / `trend_info`.

@@ -22,20 +22,91 @@
       },
       "fresh_fruit": {
         "name": "Свежее и фруктовое",
-        "dimensions": { "fresh": 1.0, "fruit": 1.0, "creamy": -0.8, "heavy": -0.5 }
+        "dimensions": {
+          "fresh": 1.0,
+          "fruit": 1.0,
+          "creamy": -0.8,
+          "heavy": -0.5
+        }
+      },
+      "sweet_cream": {
+        "name": "Сладкое и сливочное",
+        "dimensions": {
+          "sweet": 1.0,
+          "creamy": 1.0,
+          "sour": -0.7,
+          "fresh": -0.2
+        }
+      },
+      "sour_zing": {
+        "name": "Кислинка и свежесть",
+        "dimensions": {
+          "sour": 1.0,
+          "fresh": 0.6,
+          "sweet": -0.6,
+          "creamy": -0.4
+        }
+      },
+      "sweet_fruit": {
+        "name": "Сладкие фрукты",
+        "dimensions": {
+          "sweet": 0.8,
+          "fruit": 1.0,
+          "sour": -0.3,
+          "heavy": -0.3
+        }
+      },
+      "spicy_heavy": {
+        "name": "Крепкое и пряное",
+        "dimensions": {
+          "spicy": 1.0,
+          "heavy": 0.8,
+          "fresh": -0.6,
+          "fruit": -0.3
+        }
       }
     }
   },
   "likes_min": 55,
   "bands": [
-    { "min": 80, "id": "love", "emoji": "😍", "name": "Восторг", "reputation": 2 },
-    { "min": 65, "id": "like", "emoji": "😊", "name": "Понравилось", "reputation": 1 },
-    { "min": 55, "id": "okay", "emoji": "🙂", "name": "Нормально", "reputation": 0 },
-    { "min": 40, "id": "meh", "emoji": "😕", "name": "Так себе", "reputation": -1 },
-    { "min": 0, "id": "dislike", "emoji": "🤢", "name": "Не понравилось", "reputation": -2 }
+    {
+      "min": 80,
+      "id": "love",
+      "emoji": "😍",
+      "name": "Восторг",
+      "reputation": 2
+    },
+    {
+      "min": 65,
+      "id": "like",
+      "emoji": "😊",
+      "name": "Понравилось",
+      "reputation": 1
+    },
+    {
+      "min": 55,
+      "id": "okay",
+      "emoji": "🙂",
+      "name": "Нормально",
+      "reputation": 0
+    },
+    {
+      "min": 40,
+      "id": "meh",
+      "emoji": "😕",
+      "name": "Так себе",
+      "reputation": -1
+    },
+    {
+      "min": 0,
+      "id": "dislike",
+      "emoji": "🤢",
+      "name": "Не понравилось",
+      "reputation": -2
+    }
   ],
   "payment": {
-    "max": 600,
+    "max": 300,
     "min": 0,
     "exponent": 1.5,
     "round_to": 5

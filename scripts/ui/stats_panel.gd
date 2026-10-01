@@ -4,6 +4,10 @@ extends PanelContainer
 
 signal reset_requested
 signal speed_selected(value: float)
+signal trend_next_requested
+signal money_requested
+signal goal_reset_requested
+signal money_zero_requested
 
 ## Варианты ускорения игры (Engine.time_scale). Выше ×10 кадры становятся слишком «крупными»: таймеры и анимации теряют точность.
 const SPEEDS: Array[float] = [1.0, 10.0]
@@ -60,6 +64,18 @@ func _ready() -> void:
 		button.pressed.connect(func() -> void: speed_selected.emit(value))
 		speed_row.add_child(button)
 		_speed_buttons.append(button)
+	var test_row := HBoxContainer.new()
+	test_row.add_theme_constant_override("separation", 4)
+	box.add_child(test_row)
+	for entry: Array in [["Тренд ▶", "Переключить на следующий тренд", trend_next_requested], ["+1000 💰", "Добавить 1000 денег", money_requested], ["Сброс цели", "Сбросить прогресс «3 сильных рецепта»", goal_reset_requested], ["💰 → 0", "Обнулить деньги (проверка платных рецептов и бесплатных ингредиентов)", money_zero_requested]]:
+		var test_button := Button.new()
+		test_button.text = str(entry[0])
+		test_button.tooltip_text = str(entry[1])
+		test_button.add_theme_font_size_override("font_size", 12)
+		test_button.focus_mode = Control.FOCUS_NONE
+		var test_signal: Signal = entry[2]
+		test_button.pressed.connect(func() -> void: test_signal.emit())
+		test_row.add_child(test_button)
 	_label = Label.new()
 	_label.add_theme_font_size_override("font_size", 13)
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

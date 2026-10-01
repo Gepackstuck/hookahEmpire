@@ -28,7 +28,7 @@
     "redo_ignored": 12
   },
   "redo": {
-    "chance": 0.3,
+    "chance": 0.22,
     "min_puff": 4,
     "max_puff": 7,
     "timeout_seconds": 45

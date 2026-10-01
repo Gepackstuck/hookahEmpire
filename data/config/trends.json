@@ -1,0 +1,6 @@
+{
+  "_comment": "M8: авторская ротация трендов. Определения трендов (веса вкусов) — в session_scoring.json (trend.trends). Тренд меняется каждые duration_sessions визитов гостей, по кругу.",
+  "start": "fresh_fruit",
+  "duration_sessions": 3,
+  "rotation": ["fresh_fruit", "sweet_cream", "sour_zing", "sweet_fruit", "spicy_heavy"]
+}

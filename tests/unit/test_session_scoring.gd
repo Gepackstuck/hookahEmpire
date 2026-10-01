@@ -46,9 +46,9 @@ func test_context_and_final_score_formula() -> void:
 	assert_true(_near(result["final_score"], 77.5))
 	assert_eq(result["band_id"], "like")
 	assert_true(result["likes"])
-	assert_eq(result["payment"], 410)
+	assert_eq(result["payment"], 205)
 	assert_true(_near(scoring.build_result(_components(100, 100, 100, 100))["final_score"], 100.0))
-	assert_eq(scoring.build_result(_components(100, 100, 100, 100))["payment"], 600)
+	assert_eq(scoring.build_result(_components(100, 100, 100, 100))["payment"], 300)
 	assert_eq(scoring.build_result(_components(0, 0, 0, 0))["payment"], 0)
 	assert_eq(scoring.build_result(_components(0, 0, 0, 0))["band_id"], "dislike")
 

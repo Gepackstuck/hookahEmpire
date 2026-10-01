@@ -17,6 +17,9 @@ const DEFAULT_STORY_PROGRESS := "intro_start"
 var money: int = DEFAULT_MONEY
 var reputation: int = DEFAULT_REPUTATION
 var story_progress: String = DEFAULT_STORY_PROGRESS
+## M8: текущий тренд и сколько визитов гостей осталось до его смены ("" — тренд ещё не выбран).
+var current_trend_id: String = ""
+var trend_visits_left: int = 0
 ## Сюжетные флаги: стабильный id флага -> значение (bool/число/строка).
 var story_flags: Dictionary = {}
 ## Рецепты игрока: id рецепта -> запись (см. RecipeSystem).
@@ -72,6 +75,8 @@ func reset_to_defaults() -> void:
 	set_money(DEFAULT_MONEY)
 	set_reputation(DEFAULT_REPUTATION)
 	set_story_progress(DEFAULT_STORY_PROGRESS)
+	current_trend_id = ""
+	trend_visits_left = 0
 	story_flags.clear()
 	recipes.clear()
 	recipe_seq = 0
@@ -83,6 +88,8 @@ func to_dict() -> Dictionary:
 		"money": money,
 		"reputation": reputation,
 		"story_progress": story_progress,
+		"current_trend_id": current_trend_id,
+		"trend_visits_left": trend_visits_left,
 		"story_flags": story_flags.duplicate(true),
 		"recipes": recipes.duplicate(true),
 		"recipe_seq": recipe_seq,
@@ -94,6 +101,8 @@ func apply_dict(data: Dictionary) -> void:
 	set_money(int(data.get("money", DEFAULT_MONEY)))
 	set_reputation(int(data.get("reputation", DEFAULT_REPUTATION)))
 	set_story_progress(str(data.get("story_progress", DEFAULT_STORY_PROGRESS)))
+	current_trend_id = str(data.get("current_trend_id", ""))
+	trend_visits_left = int(data.get("trend_visits_left", 0))
 	var flags: Variant = data.get("story_flags", {})
 	story_flags = (flags as Dictionary).duplicate(true) if flags is Dictionary else {}
 	var rec: Variant = data.get("recipes", {})

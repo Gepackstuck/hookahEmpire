@@ -1,0 +1,47 @@
+{
+  "id": "mvp_ending",
+  "start": [
+    {
+      "node": "message"
+    }
+  ],
+  "speakers": {
+    "player": {
+      "name": "Я",
+      "portrait": "🕺"
+    },
+    "denis": {
+      "name": "Денис (сообщение)",
+      "portrait": "📱"
+    }
+  },
+  "nodes": {
+    "message": {
+      "speaker": "denis",
+      "text": "Бро, твои фирменные миксы теперь знает весь район! Мы с Максом рассказали про них знакомым.",
+      "next": "outsiders"
+    },
+    "outsiders": {
+      "speaker": "denis",
+      "text": "Это уже не наша компания — чужие люди просят записать их на кальян в твой гараж.",
+      "next": "reply"
+    },
+    "reply": {
+      "speaker": "player",
+      "text": "Внешние гости? Гараж, конечно, тесноват... Но давай попробуем.",
+      "next": "finale"
+    },
+    "finale": {
+      "speaker": "denis",
+      "text": "Тогда готовься: скоро придут первые незнакомцы. Дальше будет интереснее!",
+      "effects": [
+        {
+          "type": "set_flag",
+          "flag": "mvp_ending_seen",
+          "value": true
+        }
+      ],
+      "end": true
+    }
+  }
+}

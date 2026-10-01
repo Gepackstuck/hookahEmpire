@@ -17,6 +17,13 @@ var _recipes: RecipeSystem = null
 var _preparation: PreparationService = null
 var _manual_screen: ManualPreparationScreen = null
 var _scoring: SessionScoring = null
+## M8: тренды, деньги/репутация, цель MVP.
+var _trends: TrendSystem = null
+var _economy: EconomySystem = null
+var _goal: ProgressionGoal = null
+var _hud: StatusHud = null
+var _hud_timer := 0.0
+var _pending_cost := 0
 var _summary: SessionSummaryScreen = null
 var _viewer: ImageViewer = null
 ## M7: жар кальяна, замена углей, перезабивка (redo).
@@ -131,6 +138,7 @@ func _ready() -> void:
 			_setup_manual_screen()
 		_setup_summary_screen()
 		_setup_image_viewer()
+		_setup_m8()
 	_effects = StoryEffects.new(_state)
 	_runner.effect_requested.connect(_effects.apply)
 	_refresh_objective()
@@ -284,7 +292,7 @@ func _on_dialogue_requested(dialogue_id: String) -> void:
 	if _talk_about_hookah(dialogue_id):
 		return
 	# Подошли к гостю: если в коробке мало мундштуков, кальянщик докладывает новые.
-	if dialogue_id.begins_with("friend_") and not _autopilot and _garage.top_up_mouthpieces(2):
+	if dialogue_id.begins_with("friend_") and not _autopilot and _top_up_mouthpieces():
 		_stats.bump("mouthpiece_refill")
 		_notify("Кальянщик докладывает мундштуки в коробку.")
 	var dialogue := _library.get_dialogue(dialogue_id)
@@ -407,6 +415,9 @@ func _on_prepared(result: Dictionary) -> void:
 			_recipes.record_session(str(result["recipe_id"]), float(verdict["final_score"]), guest_id, int(verdict["payment"]))
 	_station.apply_result(result, verdict)
 	_pending_verdict = verdict
+	_pending_cost = 0
+	if _economy != null:
+		_pending_cost = _economy.recipe_cost(_recipes.get_recipe(str(result["recipe_id"])), _recipes.config.total_units)
 	_pending_serve = true
 
 
@@ -417,6 +428,7 @@ func _on_preparation_closed() -> void:
 		_refresh_objective()
 		return
 	_pending_serve = false
+	_charge_pending_cost()
 	_smoke_permission = false
 	_ask_blocked = false
 	_carrying = true
@@ -562,6 +574,7 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	session_finished.emit({
 		"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]),
 		"band_id": str(verdict["band_id"]), "payment": payment, "reputation_delta": int(verdict["reputation_delta"])})
+	_apply_session_economy(verdict)
 	_stats.record_session({"guest_id": guest_id, "recipe_id": str(verdict["recipe_id"]), "final_score": float(verdict["final_score"]), "band_id": str(verdict["band_id"]), "payment": payment})
 	GameLog.info("session", "%s: %.1f (%s), оплата %d" % [guest_id, float(verdict["final_score"]), str(verdict["band_id"]), payment])
 	_garage.set_friend_smoking(guest_id, false)
@@ -596,6 +609,8 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 		_stats.bump("guest_cycles")
 	_guest_departing = false
 	_apply_station()
+	_advance_trend()
+	await _maybe_play_ending()
 	# Новый гость приходит и садится, пока кальянщик моет кальян и убирает его на полку.
 	_start_story()
 	_carrying = true
@@ -730,6 +745,12 @@ func _replace_coals() -> void:
 	await _garage.service_coals(_heat.service_seconds)
 	_servicing = false
 	_carrying = false
+	if _economy != null:
+		var coal_paid := _economy.charge_coals()
+		if coal_paid > 0:
+			_stats.bump("spent", coal_paid)
+			_stats.bump("spent_coals", coal_paid)
+			_notify("Новые угли: −%d 💰" % coal_paid)
 	if _heat_active:
 		_heat.service()
 		_npc_service_pending = false
@@ -1069,6 +1090,20 @@ func _autopilot_idle() -> void:
 
 
 ## Простой: идёт к коробке у стола гостя и докладывает мундштуки (прерывается настоящим делом).
+## Докладывает мундштуки в коробку (если их меньше 2) и списывает стоимость новых. true — докладывал.
+func _top_up_mouthpieces() -> bool:
+	var before := _garage.mouthpiece_count()
+	if not _garage.top_up_mouthpieces(2):
+		return false
+	if _economy != null:
+		var paid := _economy.charge_mouthpieces(_garage.mouthpiece_count() - before)
+		if paid > 0:
+			_stats.bump("spent", paid)
+			_stats.bump("spent_pieces", paid)
+			_notify("Мундштуки: −%d 💰" % paid)
+	return true
+
+
 func _autopilot_refill_mouthpieces() -> void:
 	_carrying = true
 	_update_input_lock()
@@ -1089,7 +1124,7 @@ func _autopilot_refill_mouthpieces() -> void:
 		waited += 0.1
 	if _autopilot_idle_should_stop():
 		return
-	if _garage.top_up_mouthpieces(2):
+	if _top_up_mouthpieces():
 		_stats.bump("mouthpiece_refill")
 		_stats.bump("mouthpiece_refill_idle")
 
@@ -1140,7 +1175,7 @@ func _autopilot_talk(guest_id: String) -> void:
 			return
 		_garage.say("player", "Докладываю мундштуки в коробку.")
 		await get_tree().create_timer(1.4).timeout
-		if _garage.top_up_mouthpieces(2):
+		if _top_up_mouthpieces():
 			_stats.bump("mouthpiece_refill")
 	await _garage.walk_to_friend(guest_id)
 	_carrying = false
@@ -1157,7 +1192,11 @@ func _autopilot_talk(guest_id: String) -> void:
 func _autopilot_serve() -> void:
 	_rng.randomize()
 	var taste := {"preferences": _order["preferences"], "dislikes": _order.get("dislikes", {})}
-	var recipe_id := AutoCook.find_fitting_recipe(_recipes.all_recipes(), _recipes.catalog, _recipes.config, _scoring, taste, AutoCook.FIT_MIN_FOR_EXISTING)
+	var affordable: Array[Dictionary] = []
+	for candidate_recipe in _recipes.all_recipes():
+		if _economy == null or _economy.can_afford_recipe(candidate_recipe, _recipes.config.total_units):
+			affordable.append(candidate_recipe)
+	var recipe_id := AutoCook.find_fitting_recipe(affordable, _recipes.catalog, _recipes.config, _scoring, taste, AutoCook.FIT_MIN_FOR_EXISTING)
 	if recipe_id != "":
 		var known := _recipes.get_recipe(recipe_id)
 		_garage.say("player", "Есть подходящий рецепт: %s." % _recipes.display_name(known))
@@ -1197,7 +1236,9 @@ func _autopilot_mix_new_recipe() -> String:
 	for attempt in 6:
 		var noise := AutoCook.DEFAULT_NOISE if attempt < 3 else 0.0
 		var candidate := AutoCook.pick_mix(_recipes.catalog, _order["preferences"], _rng, noise)
-		if _recipes.evaluate(candidate["selection"], candidate["modifiers"])["ok"]:
+		if _economy != null and not _mix_affordable(candidate):
+			candidate = AutoCook.pick_mix(_recipes.catalog, _order["preferences"], _rng, noise, _economy.free_ingredients)
+		if not candidate["selection"].is_empty() and _recipes.evaluate(candidate["selection"], candidate["modifiers"])["ok"]:
 			mix = candidate
 			break
 	if mix.is_empty():
@@ -1270,6 +1311,7 @@ func _clear_wants_badge() -> void:
 ## Автопилот «нажимает» за игрока: листает диалоги и закрывает карточку итогов.
 func _process(delta: float) -> void:
 	_tick_session(delta)
+	_tick_hud(delta)
 	if not _autopilot:
 		_autopilot_dialogue_timer = 0.0
 		_autopilot_summary_timer = 0.0
@@ -1430,12 +1472,192 @@ func _add_stats_panel() -> void:
 	_stats_panel.provider = _stats_lines
 	_stats_panel.reset_requested.connect(func() -> void: _stats.reset())
 	_stats_panel.speed_selected.connect(_set_game_speed)
+	_stats_panel.trend_next_requested.connect(_debug_next_trend)
+	_stats_panel.money_requested.connect(_debug_add_money)
+	_stats_panel.goal_reset_requested.connect(_debug_reset_goal)
+	_stats_panel.money_zero_requested.connect(_debug_zero_money)
 	$UI/Root.add_child(_stats_panel)
 	_stats_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_stats_panel.offset_left = -420.0
 	_stats_panel.offset_right = -16.0
 	_stats_panel.offset_top = 76.0
 	_stats_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
+
+## M8: системы трендов, экономики и цели MVP, панель статуса, провайдеры для экранов.
+func _setup_m8() -> void:
+	_trends = TrendSystem.load_default(_scoring)
+	for message in _trends.errors:
+		GameLog.error("trends", message)
+	if _trends.is_valid():
+		var start_id: String = _state.current_trend_id if _state.current_trend_id != "" else _trends.current_id
+		_trends.restore(start_id, int(_state.trend_visits_left) if _state.trend_visits_left > 0 else _trends.duration_sessions)
+		_sync_trend_state()
+		_trends.trend_changed.connect(_on_trend_changed)
+	_economy = EconomySystem.load_default(_state, _recipes.catalog)
+	for message in _economy.errors:
+		GameLog.error("economy", message)
+	_economy.grant_start_money()
+	_goal = ProgressionGoal.load_default()
+	for message in _goal.errors:
+		GameLog.error("progression", message)
+	_hud = StatusHud.new()
+	$UI/Root.add_child(_hud)
+	_hud.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_hud.offset_left = 16.0
+	_hud.offset_top = 16.0
+	_preparation_screen.cost_info = _cost_info
+	_book.trend_info = _trend_info
+	_tick_hud(1.0)
+
+
+func _sync_trend_state() -> void:
+	_state.current_trend_id = _trends.current_id
+	_state.trend_visits_left = _trends.visits_left
+
+
+func _on_trend_changed(trend_id: String) -> void:
+	_sync_trend_state()
+	_stats.bump("trend_changes")
+	GameLog.info("trends", "Новый тренд: %s" % _trends.name_of(trend_id))
+	_notify("📈 Новый тренд: %s" % _trends.name_of(trend_id))
+
+
+## Гость ушёл: отсчёт визитов до смены тренда.
+func _advance_trend() -> void:
+	if _trends == null or not _trends.is_valid():
+		return
+	_trends.advance_visit()
+	_sync_trend_state()
+
+
+func _tick_hud(delta: float) -> void:
+	if _hud == null or _goal == null:
+		return
+	_hud_timer += delta
+	if _hud_timer < 0.25:
+		return
+	_hud_timer = 0.0
+	var trend_name := _trends.current_name() if _trends != null else ""
+	var left := _trends.visits_left if _trends != null else 0
+	_hud.show_text(StatusHud.format_lines(int(_state.money), int(_state.reputation), trend_name, left, _goal.progress_text(_state.recipes), _goal.is_complete(_state.recipes)))
+
+
+func _mix_affordable(mix: Dictionary) -> bool:
+	if mix.is_empty() or mix["selection"].is_empty():
+		return true
+	var evaluation := _recipes.evaluate(mix["selection"], mix["modifiers"])
+	if not evaluation["ok"]:
+		return true
+	var canonical: Dictionary = evaluation["canonical"]
+	return _economy.can_afford_recipe({"ingredients": canonical["ingredients"], "modifiers": canonical["modifiers"]}, _recipes.config.total_units)
+
+
+func _cost_info(recipe: Dictionary) -> Dictionary:
+	if _economy == null:
+		return {"cost": 0, "affordable": true}
+	var total: int = _recipes.config.total_units
+	return {"cost": _economy.recipe_cost(recipe, total), "affordable": _economy.can_afford_recipe(recipe, total)}
+
+
+## Иконка и подробности «как рецепт ложится в тренд» для книги рецептов.
+func _trend_info(recipe: Dictionary) -> Dictionary:
+	if _trends == null or not _trends.is_valid() or _scoring == null:
+		return {"icon": "", "detail": ""}
+	var profile := RecipeScoring.taste_profile({"ingredients": recipe["ingredients"], "modifiers": recipe["modifiers"]}, _recipes.catalog, _recipes.config)
+	var fit := _trends.trend_fit(profile)
+	var icon := "📈" if fit >= 65.0 else ("📉" if fit <= 40.0 else "➖")
+	var strong := ""
+	if _goal != null and _goal.is_strong(recipe):
+		strong = " ⭐ Сильный рецепт"
+	var seen: Array = recipe.get("strong_trends", [])
+	return {"icon": icon + (" ⭐" if strong != "" else ""), "detail": "Тренд «%s»: попадание %.0f%s (сильных трендов: %d)" % [_trends.current_name(), fit, strong, seen.size()]}
+
+
+## При подаче кальяна списываем стоимость платных ингредиентов (бесплатные — без списания; не хватает денег — списываем остаток).
+func _charge_pending_cost() -> void:
+	var cost := _pending_cost
+	_pending_cost = 0
+	if _economy == null or cost <= 0:
+		return
+	var charged := mini(cost, _economy.balance())
+	if _economy.spend(charged):
+		_stats.bump("spent", charged)
+		if _redo_used:
+			_stats.bump("spent_redo", charged)
+		_notify("Ингредиенты: −%d 💰" % charged)
+
+
+## Оплата и репутация за гостя, учёт «сильного рецепта».
+func _apply_session_economy(verdict: Dictionary) -> void:
+	if _economy == null:
+		return
+	var payment := int(verdict["payment"])
+	_economy.earn(payment)
+	_stats.bump("earned", payment)
+	var delta := int(verdict["reputation_delta"])
+	_economy.add_reputation(delta)
+	if payment > 0:
+		_notify("Оплата: +%d 💰" % payment)
+	if delta != 0:
+		_notify("Репутация %s%d" % ["+" if delta > 0 else "", delta])
+	if _goal == null:
+		return
+	var recipe := _recipes.get_recipe(str(verdict["recipe_id"]))
+	if recipe.is_empty():
+		return
+	if _goal.record(recipe, str(verdict.get("trend_id", "")), float(verdict["final_score"])):
+		_stats.bump("strong_recipes")
+		_notify("⭐ Сильный рецепт! Цель: %s" % _goal.progress_text(_state.recipes))
+
+
+## Цель MVP выполнена — один раз показываем финальный диалог (намёк на будущих гостей).
+func _maybe_play_ending() -> void:
+	if _goal == null or not _goal.is_complete(_state.recipes) or _state.get_flag(ProgressionGoal.ENDING_SEEN_FLAG, false) == true:
+		return
+	_state.set_flag(ProgressionGoal.DONE_FLAG, true)
+	_stats.bump("goal_done")
+	var dialogue := _library.get_dialogue(_goal.ending_dialogue)
+	if dialogue.is_empty():
+		GameLog.error("progression", "Нет финального диалога '%s'" % _goal.ending_dialogue)
+		return
+	_notify("🎯 Цель выполнена: 3 сильных рецепта!")
+	await get_tree().create_timer(1.0).timeout
+	if _runner.is_active:
+		return
+	_update_input_lock()
+	_open_dialogue_ui(dialogue["speakers"])
+	if _runner.start(dialogue, _effects.check):
+		await _runner.finished
+	else:
+		_dialogue_box.close()
+	_update_input_lock()
+
+
+func _debug_next_trend() -> void:
+	if _trends != null and _trends.is_valid():
+		_trends.set_trend(_trends.next_id())
+		_sync_trend_state()
+
+
+func _debug_add_money() -> void:
+	if _economy != null:
+		_economy.earn(1000)
+
+
+func _debug_zero_money() -> void:
+	_state.set_money(0)
+	GameLog.info("test", "Деньги обнулены (тест)")
+
+
+func _debug_reset_goal() -> void:
+	if _goal == null:
+		return
+	for recipe_id in _state.recipes:
+		_state.recipes[recipe_id].erase("strong_trends")
+	_state.set_flag(ProgressionGoal.DONE_FLAG, false)
+	_state.set_flag(ProgressionGoal.ENDING_SEEN_FLAG, false)
+	GameLog.info("test", "Цель MVP сброшена")
 
 
 ## Ускорение всей игры для тестов (Engine.time_scale): таймеры, твины, ходьба, жар, анимации.
@@ -1474,6 +1696,9 @@ func _stats_lines() -> Array[String]:
 		lines.append("Жар: — (гость не курит)")
 	lines.append("Мундштуков в коробке: %d" % _garage.mouthpiece_count())
 	lines.append("Деньги: %d, репутация: %d" % [_state.money, _state.reputation])
+	if _trends != null and _goal != null:
+		lines.append("Тренд: %s (ещё %d виз.), далее: %s" % [_trends.current_name(), _trends.visits_left, _trends.name_of(_trends.next_id())])
+		lines.append("Цель: сильных рецептов %s%s" % [_goal.progress_text(_state.recipes), " — ВЫПОЛНЕНА" if _goal.is_complete(_state.recipes) else ""])
 	lines.append("FPS: %d" % int(Engine.get_frames_per_second()))
 	lines.append("")
 	lines.append("— ЗА ЗАПУСК —")

@@ -13,8 +13,15 @@ const FIT_MIN_FOR_EXISTING := 65.0
 ## Подбирает микс под предпочтения заказа: {"selection": {ingredient_id: порции}, "modifiers": [...]}.
 ## Первый ингредиент — случайный из топ-3 по совпадению со вкусом, второй — лучший по совпадению и сочетанию
 ## с первым; с шансом noise второй берётся наугад из топ-8 (ошибка новичка). Всего 4 порции.
-static func pick_mix(catalog: IngredientCatalog, preferences: Dictionary, rng: RandomNumberGenerator, noise: float = DEFAULT_NOISE) -> Dictionary:
+static func pick_mix(catalog: IngredientCatalog, preferences: Dictionary, rng: RandomNumberGenerator, noise: float = DEFAULT_NOISE, allowed: Array = []) -> Dictionary:
 	var ranked := OrderHint.rank(catalog, preferences)
+	if not allowed.is_empty():
+		# Например, только бесплатные ингредиенты, когда не хватает денег.
+		var filtered: Array[String] = []
+		for id in ranked:
+			if allowed.has(id):
+				filtered.append(id)
+		ranked = filtered
 	if ranked.is_empty():
 		return {"selection": {}, "modifiers": []}
 	var first := ranked[rng.randi_range(0, mini(2, ranked.size() - 1))]

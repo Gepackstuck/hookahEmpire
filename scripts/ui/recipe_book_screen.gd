@@ -6,6 +6,9 @@ extends Control
 signal closed
 signal load_requested(recipe_id: String)
 
+## M8: Callable(recipe) -> {"icon": String, "detail": String} — тренд и сильный рецепт; без провайдера ничего не показывается.
+var trend_info: Callable = Callable()
+
 var _recipes: RecipeSystem = null
 var _shown: Array[Dictionary] = []
 var _selected_id := ""
@@ -149,7 +152,8 @@ func _refresh_list() -> void:
 	for index in _shown.size():
 		var recipe := _shown[index]
 		var star := "⭐ " if str(recipe["secret_id"]) != "" else ""
-		_list.add_item("%s%s — %s" % [star, _recipes.display_name(recipe), _recipes.config.band_for(float(recipe["best_score"]))["name"]])
+		var trend_icon := str((trend_info.call(recipe) as Dictionary).get("icon", "")) if trend_info.is_valid() else ""
+		_list.add_item("%s%s — %s %s" % [star, _recipes.display_name(recipe), _recipes.config.band_for(float(recipe["best_score"]))["name"], trend_icon])
 		if recipe["id"] == _selected_id:
 			keep_index = index
 	if _shown.is_empty():
@@ -190,6 +194,8 @@ func _show_detail(recipe: Dictionary) -> void:
 	_stats.text += "\nУ гостей: лучший %s, последний %s" % [
 		_session_text(float(recipe.get("best_final", RecipeSystem.NO_EXECUTION)), ""),
 		_session_text(float(recipe.get("last_final", RecipeSystem.NO_EXECUTION)), str(recipe.get("last_guest", "")))]
+	if trend_info.is_valid():
+		_stats.text += "\n" + str((trend_info.call(recipe) as Dictionary).get("detail", ""))
 	_rename_edit.text = ""
 	var secret := str(recipe["secret_id"]) != ""
 	_rename_edit.visible = not secret

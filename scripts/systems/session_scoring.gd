@@ -133,7 +133,8 @@ func evaluate(taste: Dictionary, recipe: Dictionary, execution_score: float, cat
 		"trend_fit": trend_fit(profile, trend_id),
 		"execution": execution_score,
 	}
-	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(trend_id))
+	var used_trend := trend_current if trend_id.is_empty() else trend_id
+	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(used_trend), used_trend)
 
 
 ## Пересчёт готового итога со штрафами (жар, redo): компоненты берутся из итога, поля гостя/рецепта сохраняются.
@@ -141,7 +142,7 @@ func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 
 	var components := {}
 	for key in COMPONENTS:
 		components[key] = float(verdict.get(key, 0.0))
-	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")))
+	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")), str(verdict.get("trend_id", "")))
 	for key in ["guest_id", "recipe_id", "phrase"]:
 		if verdict.has(key):
 			result[key] = verdict[key]
@@ -149,7 +150,7 @@ func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 
 
 
 ## Собирает итог из компонентов (отдельно от evaluate — для детерминированных тестов).
-func build_result(components: Dictionary, heat_penalty: float = 0.0, service_penalty: float = 0.0, profile: Dictionary = {}, trend_label: String = "") -> Dictionary:
+func build_result(components: Dictionary, heat_penalty: float = 0.0, service_penalty: float = 0.0, profile: Dictionary = {}, trend_label: String = "", trend_key: String = "") -> Dictionary:
 	var context := context_score(components)
 	var final := final_score(context, heat_penalty, service_penalty)
 	var band := band_for(final)
@@ -158,6 +159,7 @@ func build_result(components: Dictionary, heat_penalty: float = 0.0, service_pen
 		"guest_fit": float(components["guest_fit"]),
 		"trend_fit": float(components["trend_fit"]),
 		"trend_name": trend_label,
+		"trend_id": trend_key,
 		"execution": float(components["execution"]),
 		"heat_penalty": heat_penalty,
 		"service_penalty": service_penalty,

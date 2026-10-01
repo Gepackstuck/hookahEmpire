@@ -28,6 +28,10 @@ var _result_quality: Label
 var _result_lines: VBoxContainer
 var _serve_button: Button
 var _pending_result: Dictionary = {}
+## M8: Callable(recipe: Dictionary) -> {"cost": int, "affordable": bool}; стоимость ингредиентов рецепта.
+var cost_info: Callable = Callable()
+var _prepare_button: Button
+var _manual_button: Button
 
 
 func _ready() -> void:
@@ -114,12 +118,14 @@ func _build() -> void:
 	prepare_row.add_theme_constant_override("separation", 14)
 	_form.add_child(prepare_row)
 	var prepare_button := Button.new()
+	_prepare_button = prepare_button
 	prepare_button.text = "🎚 Приготовить переключателями"
 	prepare_button.custom_minimum_size = Vector2(0, 52)
 	prepare_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prepare_button.pressed.connect(_on_prepare_pressed)
 	prepare_row.add_child(prepare_button)
 	var manual_button := Button.new()
+	_manual_button = manual_button
 	manual_button.text = "✋ Приготовить вручную"
 	manual_button.custom_minimum_size = Vector2(0, 52)
 	manual_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -210,6 +216,20 @@ func _select_recipe(index: int) -> void:
 	if recipe["modifiers"].has("ice"):
 		parts.append("Ледяная нотка ❄️")
 	_recipe_info.text = " · ".join(parts)
+	var affordable := true
+	if cost_info.is_valid():
+		var info: Dictionary = cost_info.call(recipe)
+		var cost := int(info.get("cost", 0))
+		affordable = bool(info.get("affordable", true))
+		if cost <= 0:
+			_recipe_info.text += "\nИнгредиенты бесплатные 🆓"
+		elif affordable:
+			_recipe_info.text += "\nСтоимость ингредиентов: %d 💰 (спишется при подаче)" % cost
+		else:
+			_recipe_info.text += "\n⛔ Не хватает денег: нужно %d 💰. Бесплатны: яблоко, лимон, лайм, ваниль, кола." % cost
+	if _prepare_button != null:
+		_prepare_button.disabled = not affordable
+		_manual_button.disabled = not affordable
 
 
 func _sync_options() -> void:
