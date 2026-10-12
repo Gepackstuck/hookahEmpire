@@ -1,0 +1,55 @@
+{
+  "id": "friend_lera_intro",
+  "start": [
+    {
+      "node": "repeat",
+      "conditions": [
+        {
+          "type": "story_progress_is",
+          "value": "friend_04_intro_done"
+        }
+      ]
+    },
+    {
+      "node": "greet"
+    }
+  ],
+  "speakers": {
+    "player": {
+      "name": "Я",
+      "portrait": "🕺"
+    },
+    "lera": {
+      "name": "Лера",
+      "portrait": "👩"
+    }
+  },
+  "nodes": {
+    "greet": {
+      "speaker": "lera",
+      "text": "Привет! Слышала, у тебя тут уже целая компания собирается. Угостишь и меня?",
+      "next": "order"
+    },
+    "order": {
+      "speaker": "lera",
+      "text": "Давай так: {order}",
+      "effects": [
+        {
+          "type": "set_flag",
+          "flag": "lera_order_known",
+          "value": true
+        },
+        {
+          "type": "set_story_progress",
+          "value": "friend_04_intro_done"
+        }
+      ],
+      "end": true
+    },
+    "repeat": {
+      "speaker": "lera",
+      "text": "Я жду свой кальян!",
+      "end": true
+    }
+  }
+}

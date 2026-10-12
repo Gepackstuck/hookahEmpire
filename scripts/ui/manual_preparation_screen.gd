@@ -17,6 +17,8 @@ var _service: PreparationService = null
 var _manual: ManualPreparation = null
 var _sfx: ManualSfx
 var _recipe: Dictionary = {}
+## Сколько порций нужно по рецепту (7:7:6 → 3 порции 1:1:1), не больше числа кружков.
+var _needed_portions: int = 4
 var _targets: Dictionary = {}
 var _step_index: int = 0
 ## Подсказки всегда включены.
@@ -69,6 +71,7 @@ func open(recipe_id: String, _show_hints: bool = true) -> void:
 		GameLog.error("manual", "Рецепт не найден: %s" % recipe_id)
 		return
 	_recipe = recipe
+	_needed_portions = _compute_needed_portions(recipe)
 	_targets = ExecutionScoring.targets(ExecutionScoring.features(recipe, _service.recipes.catalog, _service.recipes.config), _service.config)
 	_restart()
 	visible = true
@@ -243,7 +246,7 @@ func _apply_next_state(step: String) -> void:
 func _next_blocked(step: String) -> bool:
 	match step:
 		"mix":
-			return _manual.total_portions() < _manual.config.manual_portions
+			return _manual.total_portions() < _needed_portions
 		"holes":
 			return _manual.holes.size() < _manual.config.manual_holes_min
 		"light":
@@ -266,7 +269,12 @@ func _refresh_step_texts() -> void:
 func _instruction_for(step: String) -> String:
 	match step:
 		"mix":
-			return "Шаг 1. Перетащи %d порции в кружки чаши (клик по занятому кружку убирает порцию)." % _manual.config.manual_portions
+			var text := "Шаг 1. Перетащи порции в кружки чаши по рецепту: нужно %d (клик по занятому кружку убирает порцию)." % _needed_portions
+			text += "\n💰 Ручная работа ценится: гость заплатит на 25% больше, чем за быстрый режим."
+			var modifiers: Array = _recipe.get("modifiers", []) as Array
+			if modifiers.has("ice"):
+				text += "\nВ рецепте есть ❄️ Ледяная нотка — она добавится сама, класть её не нужно."
+			return text
 		"pack":
 			return "Шаг 2. Удерживай мышь на чаше — табак набивается. Отпусти, когда набито как надо."
 		"foil":
@@ -311,6 +319,14 @@ func _hint_for(step: String) -> String:
 	return ""
 
 
+func _compute_needed_portions(recipe: Dictionary) -> int:
+	var cap := _manual.config.manual_portions
+	var selection := MixSelection.new(maxi(_service.recipes.config.max_ingredients, 1), cap)
+	selection.load_recipe(recipe, _service.recipes.config.total_units)
+	var total := selection.total_portions()
+	return clampi(total, 1, cap)
+
+
 func _recipe_text() -> String:
 	var parts: PackedStringArray = []
 	for item in _recipe["ingredients"]:
@@ -344,6 +360,8 @@ func _rebuild_tray(step: String) -> void:
 		_hot_bucket.accept_kind = "stove_coal"
 		_hot_bucket.received.connect(_on_hot_received)
 		_tray.add_child(_hot_bucket)
+		# Горячие угли слева, свежие справа.
+		_tray.move_child(_hot_bucket, 0)
 	elif step == "coals":
 		_hot_bucket = CoalBucket.new()
 		_hot_bucket.hot = true

@@ -41,12 +41,14 @@ func is_valid() -> bool:
 ## Фиксирует итог сессии: если оценка достаточна, тренд записывается в strong_trends рецепта.
 ## Возвращает true, если рецепт только что стал сильным.
 func record(recipe: Dictionary, trend_id: String, final_score: float) -> bool:
-	if trend_id.is_empty() or final_score < strong_score:
+	if final_score < strong_score:
 		return false
+	# Пока трендов нет (они открываются позже), оценка засчитывается под условным трендом "base".
+	var key := trend_id if not trend_id.is_empty() else "base"
 	var was_strong := is_strong(recipe)
 	var trends: Array = recipe.get("strong_trends", [])
-	if not trends.has(trend_id):
-		trends.append(trend_id)
+	if not trends.has(key):
+		trends.append(key)
 	recipe["strong_trends"] = trends
 	return not was_strong and is_strong(recipe)
 

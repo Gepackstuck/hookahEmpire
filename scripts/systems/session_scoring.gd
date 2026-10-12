@@ -27,6 +27,10 @@ var pay_max: float = 600.0
 var pay_min: float = 0.0
 var pay_exponent: float = 1.5
 var pay_round_to: int = 5
+## Множитель оплаты за кальян, приготовленный игроком вручную (ручная забивка).
+var manual_pay_multiplier: float = 1.25
+## Тренды открываются по ходу интро: пока выключены, оценка тренда не входит в итог и не показывается.
+var trend_enabled: bool = true
 
 
 static func load_default() -> SessionScoring:
@@ -95,6 +99,8 @@ func context_score(components: Dictionary) -> float:
 	var weight_sum := 0.0
 	var total := 0.0
 	for key in COMPONENTS:
+		if key == "trend_fit" and not trend_enabled:
+			continue
 		weight_sum += float(weights[key])
 		total += float(weights[key]) * float(components.get(key, 0.0))
 	return total / weight_sum if weight_sum > 0.0 else 0.0
@@ -121,6 +127,14 @@ func payment_for(score: float) -> int:
 	return int(round(raw / step) * step)
 
 
+## Надбавка за ручную забивку: оплата × manual_pay_multiplier (с тем же округлением). Помечает итог ключом "manual".
+func apply_manual_bonus(verdict: Dictionary) -> Dictionary:
+	verdict["manual"] = true
+	var step := float(maxi(pay_round_to, 1))
+	verdict["payment"] = int(round(float(verdict["payment"]) * manual_pay_multiplier / step) * step)
+	return verdict
+
+
 ## taste — вкус гостя (см. guest_fit), recipe — запись рецепта, execution_score — исполнение 0..100,
 ## extras: {"heat_penalty", "service_penalty", "trend"} (необязательно).
 func evaluate(taste: Dictionary, recipe: Dictionary, execution_score: float, catalog: IngredientCatalog, scoring: ScoringConfig, extras: Dictionary = {}) -> Dictionary:
@@ -134,7 +148,11 @@ func evaluate(taste: Dictionary, recipe: Dictionary, execution_score: float, cat
 		"execution": execution_score,
 	}
 	var used_trend := trend_current if trend_id.is_empty() else trend_id
-	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, trend_name(used_trend), used_trend, float(extras.get("furniture_bonus", 0.0)))
+	if not trend_enabled:
+		used_trend = ""
+	# Без трендов название пустое (trend_name("") вернул бы название текущего тренда).
+	var used_name := trend_name(used_trend) if trend_enabled else ""
+	return build_result(components, float(extras.get("heat_penalty", 0.0)), float(extras.get("service_penalty", 0.0)), profile, used_name, used_trend, float(extras.get("furniture_bonus", 0.0)))
 
 
 ## Пересчёт готового итога со штрафами (жар, redo): компоненты берутся из итога, поля гостя/рецепта сохраняются.
@@ -143,7 +161,7 @@ func rescore(verdict: Dictionary, heat_penalty: float, service_penalty: float = 
 	for key in COMPONENTS:
 		components[key] = float(verdict.get(key, 0.0))
 	var result := build_result(components, heat_penalty, service_penalty, verdict.get("profile", {}), str(verdict.get("trend_name", "")), str(verdict.get("trend_id", "")), float(verdict.get("furniture_bonus", 0.0)))
-	for key in ["guest_id", "recipe_id", "phrase"]:
+	for key in ["guest_id", "recipe_id", "phrase", "manual"]:
 		if verdict.has(key):
 			result[key] = verdict[key]
 	return result
@@ -160,6 +178,7 @@ func build_result(components: Dictionary, heat_penalty: float = 0.0, service_pen
 		"trend_fit": float(components["trend_fit"]),
 		"trend_name": trend_label,
 		"trend_id": trend_key,
+		"trend_enabled": trend_enabled,
 		"execution": float(components["execution"]),
 		"heat_penalty": heat_penalty,
 		"service_penalty": service_penalty,
@@ -209,7 +228,8 @@ func _parse(data: Dictionary) -> void:
 		pay_min = float(pay.get("min", pay_min))
 		pay_exponent = float(pay.get("exponent", pay_exponent))
 		pay_round_to = int(pay.get("round_to", pay_round_to))
-		if pay_max < pay_min or pay_exponent <= 0.0 or pay_round_to < 1:
+		manual_pay_multiplier = float(pay.get("manual_multiplier", manual_pay_multiplier))
+		if pay_max < pay_min or pay_exponent <= 0.0 or pay_round_to < 1 or manual_pay_multiplier < 1.0:
 			errors.append("session: payment: нужно max >= min, exponent > 0, round_to >= 1")
 	else:
 		errors.append("session: нет секции payment")

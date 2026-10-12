@@ -145,6 +145,13 @@ func test_preparation_screen_flow() -> void:
 	screen.open()
 	assert_true(screen._form.visible and not screen._empty.visible)
 	assert_eq(screen._recipe_ids.size(), 1)
+	assert_true(screen._mode_box.visible and not screen._switch_box.visible, "сначала выбор режима, переключателей ещё нет")
+	screen._quick_card.pressed.emit()
+	assert_true(screen._switch_box.visible and not screen._mode_box.visible, "после выбора режима появляются переключатели")
+	screen.set_quick_locked(true, "закрыто")
+	assert_true(screen._mode_box.visible and not screen._switch_box.visible and screen._quick_card.disabled, "закрытый быстрый режим — карточка недоступна")
+	screen.set_quick_locked(false)
+	screen._quick_card.pressed.emit()
 	for parameter_id in GOOD_FOR_LIGHT:
 		(screen._option_buttons[parameter_id][GOOD_FOR_LIGHT[parameter_id]] as Button).pressed.emit()
 	var results: Array[Dictionary] = []

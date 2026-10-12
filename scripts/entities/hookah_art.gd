@@ -76,6 +76,9 @@ static func _bezier(points: Array) -> PackedVector2Array:
 	return result
 
 
+## top = TOP_WATERED: чаши ещё нет (только тарелка), но в колбу уже налита вода.
+const TOP_WATERED := -1
+
 ## Кальян: origin — точка на поверхности под центром колбы. squash — «затяжка» (0..1) приседает кальян.
 ## with_hose — рисовать длинный шланг (на столе; в руках и на полке кальян без шланга).
 ## top — что стоит на кальяне: 0 — только тарелка (кальян не забит), 1 — чаша без углей, 2 — чаша с углями.
@@ -110,7 +113,7 @@ static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool
 		inner.append(p + Vector2(-float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
 	canvas.draw_colored_polygon(outer, color.darkened(0.45))
 	canvas.draw_colored_polygon(inner, color)
-	if top >= 1:
+	if top >= 1 or top == TOP_WATERED:
 		_draw_water(canvas, p, color, bubbling)
 	var pattern := color.lightened(0.4)
 	pattern.a = 0.55

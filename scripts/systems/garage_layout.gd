@@ -4,7 +4,7 @@ extends RefCounted
 ## Ошибки копятся в errors; is_valid() == false означает, что layout использовать нельзя.
 
 const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah", "sink", "wall_book"]
-const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box", "mask", "books", "image"]
+const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box", "mask", "books", "image", "boombox"]
 
 var id: String = ""
 var size: Vector2i = Vector2i.ZERO

@@ -29,6 +29,8 @@ var story_flags: Dictionary = {}
 var recipes: Dictionary = {}
 ## Монотонный счётчик событий с рецептами (порядок создания/использования).
 var recipe_seq: int = 0
+## M11: название кальянной (задаётся после двух сильных рецептов; "" — не задано).
+var bar_name: String = ""
 
 
 func set_money(value: int) -> void:
@@ -85,6 +87,7 @@ func reset_to_defaults() -> void:
 	story_flags.clear()
 	recipes.clear()
 	recipe_seq = 0
+	bar_name = ""
 
 
 ## Снимок состояния для сохранения. Новые поля добавляются по мере милестоунов.
@@ -100,6 +103,7 @@ func to_dict() -> Dictionary:
 		"story_flags": story_flags.duplicate(true),
 		"recipes": recipes.duplicate(true),
 		"recipe_seq": recipe_seq,
+		"bar_name": bar_name,
 	}
 
 
@@ -122,3 +126,4 @@ func apply_dict(data: Dictionary) -> void:
 	var rec: Variant = data.get("recipes", {})
 	recipes = (rec as Dictionary).duplicate(true) if rec is Dictionary else {}
 	recipe_seq = int(data.get("recipe_seq", 0))
+	bar_name = str(data.get("bar_name", ""))

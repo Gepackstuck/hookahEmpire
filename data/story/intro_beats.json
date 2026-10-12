@@ -77,6 +77,32 @@
         "facing": "right",
         "lift": 10
       }
+    },
+    {
+      "id": "lera_arrives",
+      "requires_progress": "friend_03_lera",
+      "delay": 4.0,
+      "action": "spawn_friend",
+      "guest": "friend_lera",
+      "entry_position": [
+        0.3,
+        7.5
+      ],
+      "entry_cell": [
+        1,
+        7
+      ],
+      "stand_cell": [
+        12,
+        10
+      ],
+      "dialogue": "friend_lera_intro",
+      "sets_progress": "friend_04_arrives",
+      "seat": {
+        "emoji": "🧘‍♀️",
+        "facing": "right",
+        "lift": 10
+      }
     }
   ]
 }

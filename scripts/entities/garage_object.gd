@@ -362,10 +362,15 @@ func _sorted_props(raw: Variant) -> Array:
 	return result
 
 
-func _draw_props(lift: Vector2) -> void:
-	_prop_hits.clear()
+## Рисует props. z_from/z_to ограничивают высоту (px): так верхняя доска шкафа ложится между вещами под ней и вещами на ней.
+func _draw_props(lift: Vector2, z_from: float = -1.0e9, z_to: float = 1.0e9) -> void:
+	if z_from <= -1.0e8:
+		_prop_hits.clear()
 	for prop in _props:
 		if _hidden_props.has(_props.find(prop)):
+			continue
+		var prop_z := float(prop.get("z", 0.0))
+		if prop_z < z_from or prop_z >= z_to:
 			continue
 		var at: Array = prop["at"]
 		var base := IsoProjection.grid_to_screen(Vector2(float(at[0]), float(at[1]))) + lift + Vector2(0, -float(prop.get("z", 0.0)))
@@ -561,36 +566,60 @@ func _draw_cup(p: Vector2, color: Color) -> void:
 	_ellipse(p + Vector2(0, -12), 5.0, 1.8, Color(1, 1, 1, 0.6))
 
 
-## Бумбокс на полке (в стилистике игры: тёмный корпус, неоновые акценты). Клик — включить/выключить музыку.
+## Бумбокс на полке: объёмный корпус (как столы), на передней грани — динамики, кассета и кнопки. Клик — музыка вкл/выкл.
 func _draw_boombox(p: Vector2, index: int) -> void:
 	var hover := index == _hover_prop
 	var body := Color("#3a3f4f").lightened(0.12 if hover else 0.0)
 	var neon := Color("#35e0ff")
 	var pink := Color("#ff3fa4")
-	_ellipse(p + Vector2(0, 1), 21.0, 3.0, Color(0, 0, 0, 0.25))
-	# Ручка и антенна.
-	draw_polyline(PackedVector2Array([p + Vector2(-11, -16), p + Vector2(-9, -21), p + Vector2(9, -21), p + Vector2(11, -16)]), Color("#1d2029"), 2.0)
-	draw_line(p + Vector2(14, -16), p + Vector2(20, -27), Color("#9aa3b5"), 1.2)
-	# Корпус.
-	var rect := Rect2(p + Vector2(-17, -16), Vector2(34, 16))
-	draw_rect(rect, body)
-	draw_rect(rect, Color("#1d2029"), false, 1.5)
-	draw_rect(Rect2(rect.position + Vector2(1, 1), Vector2(32, 2)), body.lightened(0.18))
-	# Динамики.
-	for dx in [-9.5, 9.5]:
-		var c: Vector2 = p + Vector2(dx, -8)
-		draw_circle(c, 5.6, Color("#15171e"))
-		draw_circle(c, 4.0, Color("#272b38"))
-		draw_circle(c, 1.7, neon if dx < 0 else pink)
-	# Окошко кассеты и кнопки.
-	draw_rect(Rect2(p + Vector2(-4.5, -13), Vector2(9, 5)), Color("#0d1a22"))
-	draw_circle(p + Vector2(-2, -10.5), 1.1, neon)
-	draw_circle(p + Vector2(2, -10.5), 1.1, neon)
+	var w := 1.0
+	var d := 0.34
+	var h := 17.0
+	var x0 := -w * 0.5
+	var y1 := d * 0.5
+	_ellipse(p + Vector2(0, 1), 24.0, 5.0, Color(0, 0, 0, 0.25))
+	# Антенна и ручка (за корпусом / над ним).
+	var back_top := p + IsoProjection.grid_to_screen(Vector2(w * 0.4, -d * 0.4)) + Vector2(0, -h)
+	draw_line(back_top, back_top + Vector2(8, -14), Color("#9aa3b5"), 1.4)
+	_draw_iso_box(Vector2(x0, -y1), Vector2(-x0, y1), 0.0, h, body, p)
+	_draw_iso_box(Vector2(x0 + 0.18, -0.06), Vector2(-x0 - 0.18, 0.06), h, h + 4.0, Color("#1d2029"), p)
+	# Передняя грань (+y): точки по u (клетки вдоль x) и высоте z.
+	var face := func(u: float, z: float) -> Vector2:
+		return p + IsoProjection.grid_to_screen(Vector2(x0 + u, y1)) + Vector2(0, -z)
+	for u in [0.2, 0.8]:
+		var ring := PackedVector2Array()
+		var cone := PackedVector2Array()
+		for k in 16:
+			var a := TAU * float(k) / 16.0
+			ring.append(face.call(u + cos(a) * 0.15, 8.5 + sin(a) * 5.6))
+			cone.append(face.call(u + cos(a) * 0.1, 8.5 + sin(a) * 3.8))
+		draw_colored_polygon(ring, Color("#15171e"))
+		draw_colored_polygon(cone, Color("#2a2e3c"))
+		draw_circle(face.call(u, 8.5), 1.6, neon if u < 0.5 else pink)
+	draw_colored_polygon(PackedVector2Array([face.call(0.38, 12.5), face.call(0.62, 12.5), face.call(0.62, 8.0), face.call(0.38, 8.0)]), Color("#0d1a22"))
+	draw_circle(face.call(0.45, 10.2), 1.1, neon)
+	draw_circle(face.call(0.55, 10.2), 1.1, neon)
 	for k in 3:
-		draw_rect(Rect2(p + Vector2(-4.5 + k * 3.4, -5.5), Vector2(2.4, 2)), pink if k == 0 else Color("#9aa3b5"))
+		var u0 := 0.38 + 0.08 * float(k)
+		draw_colored_polygon(PackedVector2Array([face.call(u0, 6.0), face.call(u0 + 0.06, 6.0), face.call(u0 + 0.06, 4.0), face.call(u0, 4.0)]), pink if k == 0 else Color("#9aa3b5"))
 	if hover:
-		draw_rect(rect.grow(1.5), Color(1, 1, 1, 0.5), false, 1.0)
-	_prop_hits.append({"rect": rect.grow(3.0), "index": index, "kind": "boombox", "texture": "", "title": str((_props[index] as Dictionary).get("title", "Бумбокс"))})
+		# Контур всего корпуса (силуэт: низ, правый и верхний края), а не только передней грани.
+		var corner := func(cx: float, cy: float, z: float) -> Vector2:
+			return p + IsoProjection.grid_to_screen(Vector2(cx, cy)) + Vector2(0, -z)
+		var white := Color(1, 1, 1, 0.8)
+		# Корпус: силуэт-шестиугольник по реальным размерам (низ и верх на высоте h).
+		draw_polyline(PackedVector2Array([
+			corner.call(x0, y1, 0.0), corner.call(-x0, y1, 0.0), corner.call(-x0, -y1, 0.0),
+			corner.call(-x0, -y1, h), corner.call(x0, -y1, h), corner.call(x0, y1, h), corner.call(x0, y1, 0.0)]), white, 1.5)
+		# Ручка: отдельный контур над крышкой.
+		var hx0 := x0 + 0.18
+		var hx1 := -x0 - 0.18
+		draw_polyline(PackedVector2Array([
+			corner.call(hx0, 0.06, h), corner.call(hx0, 0.06, h + 4.0), corner.call(hx1, 0.06, h + 4.0), corner.call(hx1, -0.06, h + 4.0),
+			corner.call(hx0, -0.06, h + 4.0), corner.call(hx0, 0.06, h + 4.0)]), white, 1.2)
+		draw_line(corner.call(hx1, 0.06, h + 4.0), corner.call(hx1, 0.06, h), white, 1.2)
+	var rect := Rect2(p + Vector2(-20, -h - 6), Vector2(40, h + 10))
+	_prop_hits.append({"rect": rect, "index": index, "kind": "boombox", "texture": "", "title": str((_props[index] as Dictionary).get("title", "Бумбокс"))})
 
 
 func _draw_coals(p: Vector2) -> void:
@@ -603,11 +632,11 @@ func _draw_coals(p: Vector2) -> void:
 
 
 ## Параллелепипед по координатам клеток относительно центра объекта (min/max) и высотам z0..z1 (px).
-func _draw_iso_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Color) -> void:
-	var north := IsoProjection.grid_to_screen(Vector2(min_c.x, min_c.y))
-	var east := IsoProjection.grid_to_screen(Vector2(max_c.x, min_c.y))
-	var south := IsoProjection.grid_to_screen(Vector2(max_c.x, max_c.y))
-	var west := IsoProjection.grid_to_screen(Vector2(min_c.x, max_c.y))
+func _draw_iso_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Color, offset: Vector2 = Vector2.ZERO) -> void:
+	var north := IsoProjection.grid_to_screen(Vector2(min_c.x, min_c.y)) + offset
+	var east := IsoProjection.grid_to_screen(Vector2(max_c.x, min_c.y)) + offset
+	var south := IsoProjection.grid_to_screen(Vector2(max_c.x, max_c.y)) + offset
+	var west := IsoProjection.grid_to_screen(Vector2(min_c.x, max_c.y)) + offset
 	var low := Vector2(0, -z0)
 	var high := Vector2(0, -z1)
 	draw_colored_polygon(PackedVector2Array([west + low, south + low, south + high, west + high]), color.darkened(0.35))
@@ -1214,7 +1243,7 @@ func hookah_top() -> int:
 ## Забивка: чаша лежит рядом, угольки разгораются на лотке, щипцами их кладут в чашу,
 ## затем чашу поднимают и ставят на кальян. Корутина: завершается, когда на кальяне стоит чаша с углями.
 func play_pack_sequence() -> void:
-	_hookah_top = 0
+	_hookah_top = HookahArt.TOP_WATERED
 	_loose_visible = true
 	_loose_coals = false
 	_loose_pos = Vector2(22.0, 2.0)
@@ -1473,7 +1502,8 @@ func _draw_shelf() -> void:
 	# Доски (низ, средние, верх) и левая стойка рамы.
 	var wood := frame.lightened(0.18)
 	_draw_iso_box(Vector2(-half.x, -depth), Vector2(-half.x + 0.1, depth), 0.0, height, frame)
-	for plank_z: float in planks:
+	for plank_index in planks.size() - 1:
+		var plank_z := float(planks[plank_index])
 		_draw_iso_box(Vector2(-half.x, -depth), Vector2(half.x, depth), plank_z, plank_z + 3.0, wood)
 	# Содержимое: кальяны слева направо, затем банки и мелочь.
 	for slot in _hookah_slots:
@@ -1482,7 +1512,12 @@ func _draw_shelf() -> void:
 		var at: Vector2 = slot["at"]
 		var base := IsoProjection.grid_to_screen(at) + Vector2(0, -float(slot["z"]))
 		HookahArt.draw_hookah(self, base, slot["color"], false)
-	_draw_props(Vector2.ZERO)
+	# Верхняя доска рисуется после содержимого под ней (банки на верхней полке прячутся за ней),
+	# а вещи, стоящие на самой доске (щипцы, чашка, поднос), — уже поверх неё.
+	var top_z := float(planks[planks.size() - 1])
+	_draw_props(Vector2.ZERO, -1.0e9, top_z)
+	_draw_iso_box(Vector2(-half.x, -depth), Vector2(half.x, depth), top_z, top_z + 3.0, wood)
+	_draw_props(Vector2.ZERO, top_z, 1.0e9)
 	# Правая стойка — ближняя, закрывает края.
 	_draw_iso_box(Vector2(half.x - 0.1, -depth), Vector2(half.x, depth), 0.0, height, frame)
 

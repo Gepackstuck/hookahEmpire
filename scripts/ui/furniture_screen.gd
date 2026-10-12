@@ -568,6 +568,16 @@ func _owned_card(entry: Dictionary) -> Control:
 
 ## Карточка нажата: если мышь ушла дальше порога — это перетаскивание, если отпустили на месте — обычный клик.
 func _input(event: InputEvent) -> void:
+	if visible and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		get_viewport().set_input_as_handled()
+		# Esc по шагам: подтверждение -> расстановка -> закрытие окна.
+		if _confirm_action.is_valid():
+			_answer(false)
+		elif _placing:
+			placement_cancel_requested.emit()
+		else:
+			close()
+		return
 	if _press_uid == "" or not visible:
 		return
 	if event is InputEventMouseMotion:

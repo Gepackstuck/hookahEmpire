@@ -121,9 +121,20 @@ func test_economy_reputation_clamped() -> void:
 	state.free()
 
 
-func test_goal_needs_two_trends() -> void:
+func test_goal_strong_from_one_good_score() -> void:
 	var goal := ProgressionGoal.load_default()
 	assert_true(goal.is_valid(), str(goal.errors))
+	assert_eq(goal.strong_score, 75.0)
+	assert_eq(goal.required_trends, 1)
+	var recipe := {"id": "r1"}
+	assert_true(not goal.record(recipe, "", 65.0), "ниже порога 75 не засчитывается")
+	assert_true(goal.record(recipe, "", 78.0), "без трендов хватает одной оценки 75+")
+	assert_true(goal.is_strong(recipe))
+	assert_true(not goal.record(recipe, "fresh_fruit", 90.0), "рецепт уже сильный")
+
+
+func test_goal_needs_two_trends_when_configured() -> void:
+	var goal := ProgressionGoal.from_dict({"strong_score": 75, "required_trends": 2, "goal_recipes": 3, "ending_dialogue": "mvp_ending"})
 	var recipe := {"id": "r1"}
 	assert_true(not goal.record(recipe, "fresh_fruit", 90.0), "один тренд — ещё не сильный")
 	assert_true(not goal.record(recipe, "fresh_fruit", 90.0), "тот же тренд не считается повторно")
@@ -134,15 +145,17 @@ func test_goal_needs_two_trends() -> void:
 
 func test_goal_counts_strong_recipes() -> void:
 	var goal := ProgressionGoal.load_default()
-	assert_eq(goal.goal_recipes, 1)
-	var recipes := {"weak": {"strong_trends": ["a"]}}
+	assert_eq(goal.goal_recipes, 2)
+	var recipes := {"weak": {"strong_trends": []}}
 	assert_eq(goal.strong_count(recipes), 0)
 	assert_true(not goal.is_complete(recipes))
-	assert_eq(goal.progress_text(recipes), "0/1")
-	recipes["r0"] = {"strong_trends": ["a", "b"]}
+	assert_eq(goal.progress_text(recipes), "0/2")
+	recipes["r0"] = {"strong_trends": ["base"]}
 	assert_eq(goal.strong_count(recipes), 1)
+	assert_true(not goal.is_complete(recipes))
+	recipes["r1"] = {"strong_trends": ["base"]}
 	assert_true(goal.is_complete(recipes))
-	assert_eq(goal.progress_text(recipes), "1/1")
+	assert_eq(goal.progress_text(recipes), "2/2")
 
 
 func test_mvp_ending_dialogue_valid() -> void:

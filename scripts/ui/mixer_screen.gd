@@ -24,6 +24,11 @@ var _status: Label
 var _hint: Label
 var _order_hint: Label
 var _order_hint_text := ""
+## Что хочет / не любит гость (вкусы -> вес): подсвечивает ингредиенты и вкусовые шкалы.
+var _want_prefs: Dictionary = {}
+var _want_dislikes: Dictionary = {}
+var _bar_marks: Dictionary = {}
+var _bar_names: Dictionary = {}
 var _saved_since_open := false
 
 const DIMMED := Color(1, 1, 1, 0.35)
@@ -49,7 +54,10 @@ func setup(recipes: RecipeSystem) -> void:
 		_rows.clear()
 		_percent_labels.clear()
 		_bars.clear()
+		_bar_marks.clear()
+		_bar_names.clear()
 		_build()
+		_refresh_taste_marks()
 		visible = false
 
 
@@ -59,6 +67,32 @@ func set_order_hint(text: String) -> void:
 	if _order_hint != null:
 		_order_hint.text = text
 		_order_hint.visible = not text.is_empty()
+
+
+## Вкусы заказа гостя: у шкал появляются пометки (хочет / не любит). Пустые словари — убрать.
+func set_order_taste(preferences: Dictionary, dislikes: Dictionary) -> void:
+	_want_prefs = preferences.duplicate()
+	_want_dislikes = dislikes.duplicate()
+	_refresh_taste_marks()
+
+
+func _refresh_taste_marks() -> void:
+	if _recipes == null:
+		return
+	for dimension in _bar_marks:
+		var text := ""
+		var tint := UiStyle.MUTED
+		if float(_want_prefs.get(dimension, 0.0)) > 0.0:
+			text = "👍 хочет"
+			tint = Color(0.6, 0.95, 0.6)
+		elif float(_want_dislikes.get(dimension, 0.0)) > 0.0:
+			text = "🚫 не любит"
+			tint = Color(1.0, 0.6, 0.5)
+		var label := _bar_marks[dimension] as Label
+		label.text = text
+		label.add_theme_color_override("font_color", tint)
+		var name_label := _bar_names[dimension] as Label
+		name_label.add_theme_color_override("font_color", tint if text != "" else Color.WHITE)
 
 
 func open() -> void:
@@ -230,7 +264,12 @@ func _make_bar(dimension: String) -> Control:
 	bar.custom_minimum_size = Vector2(300, 22)
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(bar)
+	var bar_mark := UiStyle.label("", 20, UiStyle.MUTED)
+	bar_mark.custom_minimum_size = Vector2(130, 0)
+	row.add_child(bar_mark)
 	_bars[dimension] = bar
+	_bar_marks[dimension] = bar_mark
+	_bar_names[dimension] = name_label
 	return row
 
 

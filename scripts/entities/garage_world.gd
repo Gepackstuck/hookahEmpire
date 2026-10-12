@@ -21,6 +21,8 @@ const HOOKAH_PREP_OBJECT_ID := "hookah_prep"
 const SHELF_OBJECT_ID := "shelf_hookah"
 const GAZE_RADIUS := 2.6
 const SINK_OBJECT_ID := "sink_wash"
+## Сколько секунд кальянщик набирает воду в колбу.
+const FLASK_FILL_SECONDS := 1.8
 const WASH_MIN_SECONDS := 3.0
 const WASH_MAX_SECONDS := 5.0
 ## Где шланг лежит на столе для кальянов (от основания кальяна): в свободном заднем правом углу, между предметами.
@@ -167,7 +169,7 @@ func _sort_entities() -> void:
 				larges.append(node as GarageObject)
 			elif (node as GarageObject).is_chair() and node.visible:
 				chairs.append(node as GarageObject)
-		elif node is Player or (node is Friend and not (node as Friend).is_seated()):
+		elif (node is Player and not (node as Player).seated) or (node is Friend and not (node as Friend).is_seated()):
 			characters.append(node)
 	for character in characters:
 		var at: Vector2 = character.get("grid_position")
@@ -185,10 +187,11 @@ func _sort_entities() -> void:
 			elif behind and ci > oi:
 				nodes.remove_at(ci)
 				nodes.insert(nodes.find(large), character)
-	# Сидящий гость рисуется поверх своего стула (спинка у него за спиной), но под столом.
+	# Сидящий (гость или кальянщик) рисуется поверх своего стула (спинка у него за спиной), но под столом.
 	for node in nodes.duplicate():
-		if node is Friend and (node as Friend).is_seated():
-			var at: Vector2 = (node as Friend).grid_position
+		var is_seated_person := (node is Friend and (node as Friend).is_seated()) or (node is Player and (node as Player).seated)
+		if is_seated_person:
+			var at: Vector2 = node.get("grid_position")
 			var seat: GarageObject = null
 			var best := 1.2
 			for chair in chairs:
@@ -947,10 +950,27 @@ func fetch_random_hookah() -> void:
 	_hookah_color = color
 	_player.set_carrying_hookah(color)
 	await get_tree().create_timer(0.2).timeout
+	await _fill_flask_at_sink()
 	await _walk_to(_prep_cell)
 	_player.set_carrying(null)
 	await _place_hookah(HOOKAH_PREP_OBJECT_ID)
 	set_input_locked(was_locked)
+
+
+## Перед забивкой кальянщик набирает колбу водой в раковине (кальян в руках, вода течёт из крана).
+func _fill_flask_at_sink() -> void:
+	var sink: Variant = _objects.get(SINK_OBJECT_ID)
+	if not (sink is GarageObject) or _player == null or _grid == null:
+		return
+	var basin := sink as GarageObject
+	await _walk_to(basin.front_cell())
+	_player.face_toward(basin.position.x)
+	basin.set_washing(true, Color(0, 0, 0, 0), "flask")
+	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
+	# Колба наполнилась: вода видна в кальяне, который кальянщик держит в руках.
+	_player.set_carrying_hookah(_hookah_color, HookahArt.TOP_WATERED)
+	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
+	basin.set_washing(false)
 
 
 ## Цвет текущего кальяна (взятого с полки).
@@ -1028,7 +1048,7 @@ func _place_hookah(object_id: String) -> void:
 	# Кальянщик ставит кальян лицом к столу.
 	_player.face_toward((hookah as GarageObject).position.x)
 	(hookah as GarageObject).set_hookah_color(_hookah_color)
-	(hookah as GarageObject).set_hookah_top(0 if object_id == HOOKAH_PREP_OBJECT_ID else 2)
+	(hookah as GarageObject).set_hookah_top(HookahArt.TOP_WATERED if object_id == HOOKAH_PREP_OBJECT_ID else 2)
 	_hose.color = _hookah_color
 	_hose.handle_style = _handle_style
 	if object_id == HOOKAH_PREP_OBJECT_ID:

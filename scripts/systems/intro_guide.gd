@@ -6,12 +6,14 @@ extends RefCounted
 ## мебель — после furniture_after_sessions. Цель: первый не выполненный и применимый шаг из STEPS.
 
 const CONFIG_PATH := "res://data/config/intro.json"
-const STEPS: Array[String] = ["serve_first", "place_couch", "serve_second", "serve_third", "recipes", "heat", "decorate", "strong"]
+const STEPS: Array[String] = ["serve_first", "place_couch", "serve_second", "serve_third", "recipes", "heat", "decorate", "strong", "second_seat", "new_guest"]
 const BEN_RANGES: Array[String] = ["remind_seconds", "sit_seconds", "linger_seconds", "phone_seconds"]
 
 var errors: Array[String] = []
 var quick_after_sessions: int = 2
 var furniture_after_sessions: int = 1
+## Номер гостя, с приходом которого открываются тренды.
+var trends_at_guest: int = 10
 var ben: Dictionary = {}
 var texts: Dictionary = {}
 var recipes_needed: int = 3
@@ -45,6 +47,11 @@ func is_quick_unlocked(sessions: int) -> bool:
 	return sessions >= quick_after_sessions
 
 
+## Тренды открываются, когда приходит гость номер trends_at_guest (sessions — сколько визитов уже завершено).
+func is_trends_unlocked(sessions: int) -> bool:
+	return sessions + 1 >= trends_at_guest
+
+
 func is_furniture_unlocked(sessions: int) -> bool:
 	return sessions >= furniture_after_sessions
 
@@ -65,7 +72,7 @@ func ben_lines(key: String) -> Array:
 
 
 ## Контекст: heat_warn (угли просят замены), sessions, ben_here, couch_placed, recipe_count, coals_replaced, furniture_unlocked, extra_furniture_placed,
-## goal_done, progress_text.
+## goal_done, second_seat_done, new_guest_met, quick_served (гостя обслужили в быстром режиме), progress_text.
 ## Возвращает {"id", "text", "done_count", "total"}: id "done" — все шаги пройдены.
 func current_step(ctx: Dictionary) -> Dictionary:
 	var done_count := 0
@@ -99,7 +106,8 @@ func _step_state(step_id: String, ctx: Dictionary) -> String:
 		"serve_second":
 			return "done" if sessions >= 2 else "todo"
 		"serve_third":
-			return "done" if sessions >= 3 else "todo"
+			# Условие висит, пока друга не обслужили именно в быстром режиме.
+			return "done" if bool(ctx.get("quick_served", false)) else "todo"
 		"recipes":
 			return "done" if int(ctx.get("recipe_count", 0)) >= recipes_needed else "todo"
 		"heat":
@@ -113,6 +121,15 @@ func _step_state(step_id: String, ctx: Dictionary) -> String:
 			return "done" if int(ctx.get("extra_furniture_placed", 0)) >= 1 else "todo"
 		"strong":
 			return "done" if bool(ctx.get("goal_done", false)) else "todo"
+		"second_seat":
+			# Появляется после сильных рецептов: купить и поставить стол и стул для второго места.
+			if not bool(ctx.get("goal_done", false)):
+				return "skip"
+			return "done" if bool(ctx.get("second_seat_done", false)) else "todo"
+		"new_guest":
+			if not bool(ctx.get("second_seat_done", false)):
+				return "skip"
+			return "done" if bool(ctx.get("new_guest_met", false)) else "todo"
 	return "skip"
 
 
@@ -135,6 +152,9 @@ func _parse(data: Dictionary) -> void:
 	else:
 		quick_after_sessions = int(unlocks.get("quick_after_sessions", quick_after_sessions))
 		furniture_after_sessions = int(unlocks.get("furniture_after_sessions", furniture_after_sessions))
+		trends_at_guest = int(unlocks.get("trends_at_guest", trends_at_guest))
+		if trends_at_guest < 1:
+			errors.append("intro: unlocks.trends_at_guest должен быть >= 1")
 		if quick_after_sessions < 0 or furniture_after_sessions < 0:
 			errors.append("intro: unlocks.* должны быть >= 0")
 	var raw_ben: Variant = data.get("ben", {})

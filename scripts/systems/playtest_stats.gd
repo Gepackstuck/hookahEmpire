@@ -99,7 +99,7 @@ func visit_lines() -> Array[String]:
 	var from := maxi(visits.size() - VISIT_LOG_SHOWN, 0)
 	for i in range(from, visits.size()):
 		var v: Dictionary = visits[i]
-		lines.append("%d) %s: хочет [%s], не любит [%s]; тренд «%s»; рецепт %s, балл %.1f, оплата %d" % [i + 1, str(v.get("guest_id", "?")).trim_prefix("friend_"), _prefs_text(v.get("prefs", {})), _prefs_text(v.get("dislikes", {})), str(v.get("trend_name", "?")), str(v.get("recipe_name", v.get("recipe_id", "?"))), float(v.get("final_score", 0.0)), int(v.get("payment", 0))])
+		lines.append("%d) %s: хочет [%s], не любит [%s]; тренд «%s»; рецепт %s, балл %.1f, оплата %d" % [i + 1, str(v.get("guest_id", "?")).trim_prefix("friend_"), _prefs_text(v.get("prefs", {})), _prefs_text(v.get("dislikes", {})), str(v.get("trend_name", "")) if str(v.get("trend_name", "")) != "" else "—", str(v.get("recipe_name", v.get("recipe_id", "?"))), float(v.get("final_score", 0.0)), int(v.get("payment", 0))])
 	return lines
 
 
@@ -155,7 +155,7 @@ func summary_lines() -> Array[String]:
 	lines.append("Экономика: заработано %d, потрачено %d (в т.ч. перезабивки %d, угли %d, мундштуки %d), доход на визит %.1f" % [count("earned"), count("spent"), count("spent_redo"), count("spent_coals"), count("spent_pieces"), float(count("earned") - count("spent")) / float(maxi(sessions, 1))])
 	lines.append("Мебель: куплено %d (потрачено %d 💰), поставлено %d раз, убрано %d, продано %d (+%d 💰)" % [count("furniture_bought"), count("furniture_spent"), count("furniture_placed"), count("furniture_removed"), count("furniture_sold"), count("furniture_sold_income")])
 	lines.append("Тренды: смен %d, сильных рецептов найдено %d, цель выполнена %d раз" % [count("trend_changes"), count("strong_recipes"), count("goal_done")])
-	lines.append("Кругов гостей (Ден → Макс) завершено: %d" % count("guest_cycles"))
+	lines.append("Кругов гостей (Ден → Макс → Иван → Лера) завершено: %d" % count("guest_cycles"))
 	var idle_parts: PackedStringArray = []
 	var idle_keys: Array = []
 	for key in counters:

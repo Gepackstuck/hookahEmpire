@@ -7,6 +7,9 @@ signal session_finished(result: Dictionary)
 
 const DIALOGUES_DIR := "res://data/dialogues"
 const BEATS_PATH := "res://data/story/intro_beats.json"
+const SaveServiceScript := preload("res://scripts/core/save_service.gd")
+
+var _save: SaveServiceScript = null
 
 var _state: Node = null
 var _effects: StoryEffects = null
@@ -97,7 +100,7 @@ const BEN_ENTRY_POSITION := Vector2(0.3, 7.5)
 const BEN_ENTRY_CELL := Vector2i(1, 7)
 const BEN_WAIT_CELL := Vector2i(9, 12)
 const NOTICE_AUTOPILOT_DELAY := 4.0
-const AUTOPILOT_AFTER_SESSIONS := 3
+const QUICK_SERVED_FLAG := "quick_served"
 ## Минимальное совпадение рецепта с заказом, чтобы автопилот повторил «почти сильный» рецепт при новом тренде.
 const STRONG_HUNT_MIN_FIT := 55.0
 var _intro: IntroGuide = null
@@ -108,6 +111,8 @@ var _guide_label: Label = null
 var _game_seconds := 0.0
 var _strong_count := 0
 var _notice_overlay: Control = null
+## Окно, которое автопилот не закрывает сам: игра на паузе, пока игрок не нажмёт кнопку.
+var _notice_hold := false
 var _notice_timer := 0.0
 var _furnish_next_try := 0.0
 var _modal_dim: ColorRect = null
@@ -140,8 +145,14 @@ func _ready() -> void:
 		if get_node_or_null("/root/%s" % autoload_name) == null:
 			GameLog.error("main", "Autoload не найден: %s" % autoload_name)
 
+	_save = get_node_or_null("/root/SaveService") as SaveServiceScript
+	_apply_saved_volume()
+	# M11: пока профиль не выбран, показываем только список профилей.
+	if _save != null and _save.needs_profile_choice():
+		_show_profile_gate()
+		return
+
 	_add_debug_button()
-	_add_volume_slider()
 	_add_stats_panel()
 	_add_objective_label()
 	_garage.friend_arrived.connect(_on_friend_arrived)
@@ -164,6 +175,8 @@ func _ready() -> void:
 	_state = get_node_or_null("/root/GameState")
 	if _state == null:
 		return
+	if _save != null and _save.autosave_enabled:
+		_save.load_game()
 	_recipes = RecipeSystem.create(_state)
 	if _recipes != null:
 		_mixer.setup(_recipes)
@@ -194,8 +207,11 @@ func _ready() -> void:
 	_beats = StoryBeats.load_file(BEATS_PATH)
 	for message in _beats.errors:
 		GameLog.error("story", message)
+	# Загруженный прогресс «гость в середине визита» откатываем к его приходу.
+	_state.set_story_progress(_beats.rewind_progress(_state.story_progress))
 	_apply_station()
 	_start_story()
+	_setup_profiles()
 	# Автопилот по умолчанию включён (в отладочной сборке, где есть кнопка 🤖).
 	if OS.is_debug_build():
 		if _autopilot_allowed():
@@ -227,6 +243,8 @@ func _run_beat(beat: Dictionary) -> void:
 ## Друг пришёл: кидаем его заказ (случайный вкус; гость со случайным вкусом отличается от предыдущего).
 func _on_friend_arrived(guest_id: String) -> void:
 	_mark_beat("arrive_%s" % guest_id)
+	if _intro != null and _intro.is_trends_unlocked(_sessions_done()):
+		_unlock_trends()
 	if _order.is_empty():
 		var guest := GuestCatalog.load_guest(guest_id)
 		if not guest.is_empty():
@@ -244,6 +262,7 @@ func _on_friend_arrived(guest_id: String) -> void:
 			GameLog.info("guests", "Заказ %s: %s %s" % [guest_id, str(_order["id"]), str(_order["preferences"])])
 			if _recipes != null:
 				_mixer.set_order_hint("💡 Заказ %s: %s" % [str(guest["name"]), OrderHint.suggest(_recipes.catalog, _order["preferences"], 2, _rng)])
+				_mixer.set_order_taste(_order["preferences"], _order.get("dislikes", {}))
 	_apply_station()
 	_refresh_objective()
 
@@ -395,9 +414,9 @@ func _with_order_text(dialogue: Dictionary) -> Dictionary:
 ## Игра "заморожена" для мира, пока открыт любой экран или идёт диалог.
 func _update_input_lock() -> void:
 	# Мышь (маски, книги, свиток) работает, пока не открыто окно или диалог.
-	_garage.set_pointer_enabled(not (_mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() \
+	_garage.set_pointer_enabled(not (_mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() or _profile_menu_open() \
 		or (_summary != null and _summary.visible) or (_viewer != null and _viewer.visible) or (_runner.is_active and not _autopilot)))
-	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() or (_summary != null and _summary.visible) or _runner.is_active or _autopilot)
+	_garage.set_input_locked(_carrying or _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible) or _furniture_open() or _profile_menu_open() or (_summary != null and _summary.visible) or _runner.is_active or _autopilot)
 
 
 var _chiptune: ChipTune = null
@@ -474,6 +493,10 @@ func _on_prepared(result: Dictionary) -> void:
 			verdict = _scoring.evaluate(taste, recipe, float(result["execution_score"]), _recipes.catalog, _recipes.config, {"furniture_bonus": _furniture.score_bonus() if _furniture != null else 0.0})
 			verdict["guest_id"] = guest_id
 			verdict["recipe_id"] = str(result["recipe_id"])
+			if str(result.get("mode", "")) == "manual" and str(result.get("preparer", "player")) == "player":
+				_scoring.apply_manual_bonus(verdict)
+			if str(result.get("mode", "")) == "quick" and str(result.get("preparer", "player")) == "player" and not _autopilot:
+				_state.set_flag(QUICK_SERVED_FLAG, true)
 			_recipes.record_session(str(result["recipe_id"]), float(verdict["final_score"]), guest_id, int(verdict["payment"]))
 	_station.apply_result(result, verdict)
 	_pending_verdict = verdict
@@ -663,6 +686,7 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	await _garage.friend_leave(guest_id)
 	_order = {}
 	_mixer.set_order_hint("")
+	_mixer.set_order_taste({}, {})
 	var progress: String = _state.story_progress
 	# Гость обслужен: заказ снова неизвестен (при следующем визите он опять сделает заказ),
 	# а сюжет переходит к «обслужен» даже если разговор при визите был пропущен.
@@ -672,7 +696,10 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	elif progress.ends_with("_intro_done"):
 		_state.set_story_progress(progress.replace("_intro_done", "_done"))
 	# Гости ходят по кругу: после последнего (Макс) снова приходит первый (Ден).
-	if _state.story_progress == LOOP_END_PROGRESS and _beats != null and _beats.find_for_progress(LOOP_RESTART_PROGRESS).size() > 0:
+	if _state.story_progress == LOOP_END_PROGRESS and _second_seat_ready() and _beats != null and _beats.find_for_progress(LERA_PROGRESS).size() > 0:
+		# Второе место для гостя готово: после Ивана приходит четвёртый гость (Лера).
+		_state.set_story_progress(LERA_PROGRESS)
+	elif (_state.story_progress == LOOP_END_PROGRESS or _state.story_progress == LERA_END_PROGRESS) and _beats != null and _beats.find_for_progress(LOOP_RESTART_PROGRESS).size() > 0:
 		_state.set_story_progress(LOOP_RESTART_PROGRESS)
 		_stats.bump("guest_cycles")
 	_guest_departing = false
@@ -690,6 +717,7 @@ func _finish_session(guest_id: String, verdict: Dictionary) -> void:
 	_update_input_lock()
 	_apply_station()
 	_refresh_objective()
+	_autosave()
 
 
 # --- M7: жар, замена углей, перезабивка ------------------------------------------------------
@@ -846,6 +874,9 @@ func _replace_coals() -> void:
 		_stats.bump("coal_service_npc")
 	_update_input_lock()
 	_apply_station()
+	# Пока кальянщик меняет угли, гость не курит (в любом состоянии жара); после замены курение возобновится.
+	if _session_guest_id != "":
+		_garage.set_friend_smoking(_session_guest_id, false)
 	await _garage.service_coals(_heat.service_seconds)
 	_servicing = false
 	_carrying = false
@@ -932,6 +963,8 @@ func _run_smoking_phase(guest_id: String, verdict: Dictionary, token: int) -> Di
 	_stop_heat()
 	if (heat_penalty > 0.04 or _service_penalty > 0.0) and _scoring != null:
 		var revised := _scoring.rescore(verdict, heat_penalty, _service_penalty)
+		if bool(revised.get("manual", false)):
+			_scoring.apply_manual_bonus(revised)
 		_recipes.revise_last(str(revised.get("recipe_id", "")), float(revised["final_score"]), int(revised["payment"]))
 		_last_verdict = revised
 		_notify("Штраф: жар −%.1f, перезабивка −%.1f. Итог %.1f, оплата %d." % [heat_penalty, _service_penalty, float(revised["final_score"]), int(revised["payment"])])
@@ -1027,7 +1060,7 @@ func _set_autopilot(on: bool) -> void:
 	if on and not _autopilot_allowed():
 		if _autopilot_button != null:
 			_autopilot_button.set_pressed_no_signal(false)
-		_notify("🔒 Автопилот откроется после третьего гостя: двух обслужи вручную, третьего — в быстром режиме.")
+		_notify("🔒 Автопилот откроется, когда ты обслужишь друга в быстром режиме 🎚.")
 		return
 	_autopilot = on
 	if _autopilot_button != null:
@@ -1125,6 +1158,38 @@ const IDLE_ACTIONS := {
 ## Гости приходят по кругу: когда прогресс доходит до LOOP_END_PROGRESS, он сбрасывается на LOOP_RESTART_PROGRESS.
 const LOOP_END_PROGRESS := "friend_03_done"
 const LOOP_RESTART_PROGRESS := "intro_start"
+const LERA_PROGRESS := "friend_03_lera"
+const LERA_END_PROGRESS := "friend_04_done"
+const LERA_ID := "friend_lera"
+const SECOND_SEAT_FLAG := "second_seat_done"
+const TRENDS_FLAG := "trends_unlocked"
+
+
+## Тренды открываются с приходом гостя номер intro.trends_at_guest (10-й).
+func _trends_on() -> bool:
+	return _state != null and _state.get_flag(TRENDS_FLAG, false) == true
+
+
+## Куплены и поставлены стол и стул для второго места гостя (флаг остаётся, даже если мебель потом уберут).
+func _second_seat_ready() -> bool:
+	if _state == null:
+		return false
+	if _state.get_flag(SECOND_SEAT_FLAG, false) == true:
+		return true
+	if _furniture != null and _furniture.placed_count("small_table") >= 1 and _furniture.placed_count("chair") >= 1:
+		_state.set_flag(SECOND_SEAT_FLAG, true)
+		return true
+	return false
+
+
+func _unlock_trends() -> void:
+	if _trends_on():
+		return
+	_state.set_flag(TRENDS_FLAG, true)
+	if _scoring != null:
+		_scoring.trend_enabled = true
+	_notify("📈 Появились тренды: гости теперь следят за модой!")
+	_refresh_guide()
 const IDLE_MIN_SECONDS := 9.0
 const IDLE_MAX_SECONDS := 16.0
 var _idle_walking := false
@@ -1439,13 +1504,14 @@ func _process(delta: float) -> void:
 	_game_seconds += delta
 	if _modal_dim != null:
 		_modal_dim.visible = _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible)
-	if _notice_overlay != null and _autopilot:
+	if _notice_overlay != null and _autopilot and not _notice_hold:
 		_notice_timer += delta
 		if _notice_timer >= NOTICE_AUTOPILOT_DELAY:
 			_notice_closed.emit()
 	_tick_session(delta)
 	_tick_hud(delta)
 	_tick_wait_line(delta)
+	_tick_autosave(delta)
 	if not _autopilot:
 		_autopilot_dialogue_timer = 0.0
 		_autopilot_summary_timer = 0.0
@@ -1471,6 +1537,8 @@ func _process(delta: float) -> void:
 
 ## Отладка: F9 или кнопка 🔃 в углу освобождают кальян (в релизе это делают заказы гостей, M6).
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		_open_pause_menu()
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F11:
 		_toggle_fullscreen()
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
@@ -1507,35 +1575,15 @@ func _toggle_fullscreen() -> void:
 
 ## Громкость: ползунок рядом с кнопкой отладки; по умолчанию 0%.
 const DEFAULT_VOLUME_PERCENT := 0.0
+const VOLUME_SETTING := "volume_percent"
 
 
-func _add_volume_slider() -> void:
-	var box := HBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	box.offset_left = -470.0
-	box.offset_right = -264.0
-	box.offset_top = 16.0
-	box.offset_bottom = 68.0
-	box.add_theme_constant_override("separation", 8)
-	box.alignment = BoxContainer.ALIGNMENT_END
-	var icon := Label.new()
-	icon.text = "🔊"
-	icon.add_theme_font_size_override("font_size", 28)
-	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	box.add_child(icon)
-	var slider := HSlider.new()
-	slider.min_value = 0.0
-	slider.max_value = 100.0
-	slider.step = 1.0
-	slider.value = DEFAULT_VOLUME_PERCENT
-	slider.custom_minimum_size = Vector2(150, 0)
-	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	slider.focus_mode = Control.FOCUS_NONE
-	slider.tooltip_text = "Громкость"
-	slider.value_changed.connect(_set_volume_percent)
-	box.add_child(slider)
-	$UI/Root.add_child(box)
-	_set_volume_percent(DEFAULT_VOLUME_PERCENT)
+## Громкость задаётся в настройках (главное меню / пауза) и запоминается; здесь — применяем сохранённую.
+func _apply_saved_volume() -> void:
+	var percent := DEFAULT_VOLUME_PERCENT
+	if _save != null:
+		percent = float(_save.load_setting(VOLUME_SETTING, DEFAULT_VOLUME_PERCENT))
+	_set_volume_percent(percent)
 
 
 func _set_volume_percent(percent: float) -> void:
@@ -1590,18 +1638,6 @@ func _add_debug_button() -> void:
 
 ## Кнопка 📊 и окно статистики для ручного тестирования (есть в любой сборке).
 func _add_stats_panel() -> void:
-	_stats_button = Button.new()
-	_stats_button.text = "📊"
-	_stats_button.tooltip_text = "Статистика теста (F8)"
-	_stats_button.focus_mode = Control.FOCUS_NONE
-	_stats_button.add_theme_font_size_override("font_size", 28)
-	_stats_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_stats_button.offset_left = -252.0
-	_stats_button.offset_right = -196.0
-	_stats_button.offset_top = 16.0
-	_stats_button.offset_bottom = 68.0
-	_stats_button.pressed.connect(_toggle_stats_panel)
-	$UI/Root.add_child(_stats_button)
 	_stats_panel = StatsPanel.new()
 	_stats_panel.provider = _stats_lines
 	_stats_panel.reset_requested.connect(func() -> void: _stats.reset())
@@ -1638,6 +1674,8 @@ func _setup_m8() -> void:
 	_goal = ProgressionGoal.load_default()
 	for message in _goal.errors:
 		GameLog.error("progression", message)
+	if _scoring != null:
+		_scoring.trend_enabled = _trends_on()
 	_hud = StatusHud.new()
 	$UI/Root.add_child(_hud)
 	_hud.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -1662,7 +1700,7 @@ func _on_trend_changed(trend_id: String) -> void:
 
 ## Гость ушёл: отсчёт визитов до смены тренда.
 func _advance_trend() -> void:
-	if _trends == null or not _trends.is_valid():
+	if _trends == null or not _trends.is_valid() or not _trends_on():
 		return
 	_trends.advance_visit()
 	_sync_trend_state()
@@ -1677,7 +1715,7 @@ func _tick_hud(delta: float) -> void:
 	_hud_timer = 0.0
 	var trend_name := _trends.current_name() if _trends != null else ""
 	var left := _trends.visits_left if _trends != null else 0
-	_hud.show_text(StatusHud.format_lines(int(_state.money), int(_state.reputation), trend_name, left, _goal.progress_text(_state.recipes), _goal.is_complete(_state.recipes)))
+	_hud.show_text(StatusHud.format_lines(int(_state.money), int(_state.reputation), trend_name, left, _goal.progress_text(_state.recipes), _goal.is_complete(_state.recipes), _trends_on()))
 
 
 func _mix_affordable(mix: Dictionary) -> bool:
@@ -1699,7 +1737,7 @@ func _cost_info(recipe: Dictionary) -> Dictionary:
 
 ## Иконка и подробности «как рецепт ложится в тренд» для книги рецептов.
 func _trend_info(recipe: Dictionary) -> Dictionary:
-	if _trends == null or not _trends.is_valid() or _scoring == null:
+	if not _trends_on() or _trends == null or not _trends.is_valid() or _scoring == null:
 		return {"icon": "", "detail": ""}
 	var profile := RecipeScoring.taste_profile({"ingredients": recipe["ingredients"], "modifiers": recipe["modifiers"]}, _recipes.catalog, _recipes.config)
 	var fit := _trends.trend_fit(profile)
@@ -1747,7 +1785,8 @@ func _apply_session_economy(verdict: Dictionary) -> void:
 		_stats.bump("strong_recipes")
 		var trend_names: Array = []
 		for trend_id in recipe.get("strong_trends", []):
-			trend_names.append(_trends.name_of(str(trend_id)) if _trends != null else str(trend_id))
+			var trend_label := _trends.name_of(str(trend_id)) if _trends != null else str(trend_id)
+			trend_names.append(trend_label if not trend_label.is_empty() else "без трендов")
 		_stats.add_strong(_recipes.display_name(recipe), trend_names)
 		_strong_count += 1
 		_mark_beat("strong_%d" % _strong_count)
@@ -1777,7 +1816,10 @@ func _maybe_play_ending() -> void:
 		_dialogue_box.close()
 	_update_input_lock()
 	if _intro != null:
-		await _show_notice(_intro.ending_notice)
+		await _show_notice(_intro.ending_notice, true)
+	if _state.bar_name.is_empty() and _save != null and _save.autosave_enabled:
+		await _prompt_bar_name()
+	_autosave()
 
 
 ## M9: окно мебели (кнопка 🛋️): магазин, расстановка, перемещение и уборка предметов.
@@ -2110,7 +2152,7 @@ func _mark_beat(key: String) -> void:
 
 
 func _autopilot_allowed() -> bool:
-	return _intro == null or _sessions_done() >= AUTOPILOT_AFTER_SESSIONS
+	return _intro == null or (_state != null and _state.get_flag(QUICK_SERVED_FLAG, false) == true)
 
 
 func _furniture_unlocked() -> bool:
@@ -2137,7 +2179,7 @@ func _apply_unlocks() -> void:
 		_notify("🛋️ Открыта мебель: кнопка слева вверху!")
 	if _autopilot_button != null:
 		_autopilot_button.disabled = not _autopilot_allowed()
-		_autopilot_button.tooltip_text = "Автопилот кальянщика (F10)" if _autopilot_allowed() else "Автопилот откроется после третьего гостя"
+		_autopilot_button.tooltip_text = "Автопилот кальянщика (F10)" if _autopilot_allowed() else "Автопилот откроется после обслуживания друга в быстром режиме"
 	_refresh_guide()
 
 
@@ -2189,6 +2231,9 @@ func _refresh_guide() -> void:
 		"furniture_unlocked": _intro.is_furniture_unlocked(count),
 		"extra_furniture_placed": _furniture.placed_non_gift_count() if _furniture != null else 0,
 		"goal_done": _state.get_flag(ProgressionGoal.DONE_FLAG, false) == true,
+		"second_seat_done": _second_seat_ready(),
+		"quick_served": _state.get_flag(QUICK_SERVED_FLAG, false) == true,
+		"new_guest_met": _trends_on(),
 		"progress_text": _goal.progress_text(_state.recipes) if _goal != null else "",
 	}
 	var step := _intro.current_step(ctx)
@@ -2265,6 +2310,7 @@ func _restore_ben() -> void:
 
 
 func _on_furniture_changed() -> void:
+	_autosave()
 	_sync_buddy_couch()
 	_refresh_guide()
 
@@ -2304,9 +2350,12 @@ func _play_dialogue(dialogue_id: String) -> void:
 
 # --- Уведомление (открытая концовка) ---
 
-func _show_notice(text: String) -> void:
+func _show_notice(text: String, hold: bool = false) -> void:
 	if text.is_empty():
 		return
+	_notice_hold = hold
+	if hold:
+		_set_furniture_pause(true)
 	_carrying = true
 	_update_input_lock()
 	var overlay := Control.new()
@@ -2346,6 +2395,9 @@ func _show_notice(text: String) -> void:
 	await _notice_closed
 	overlay.queue_free()
 	_notice_overlay = null
+	if hold:
+		_notice_hold = false
+		_set_furniture_pause(false)
 	_carrying = false
 	_update_input_lock()
 
@@ -2418,6 +2470,11 @@ func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_autosave()
+
+
 func _toggle_stats_panel() -> void:
 	if _stats_panel != null:
 		_stats_panel.toggle()
@@ -2446,7 +2503,10 @@ func _stats_lines() -> Array[String]:
 		var furniture_totals := _furniture.totals()
 		lines.append("Мебель: расставлено %d из %d, комфорт %d, атмосфера %d, бонус к оценке +%.1f" % [int(furniture_totals["placed"]), _furniture.owned_count(), int(furniture_totals["comfort"]), int(furniture_totals["atmosphere"]), float(furniture_totals["bonus"])])
 	if _trends != null and _goal != null:
-		lines.append("Тренд: %s (ещё %d виз.), далее: %s" % [_trends.current_name(), _trends.visits_left, _trends.name_of(_trends.next_id())])
+		if _trends_on():
+			lines.append("Тренд: %s (ещё %d виз.), далее: %s" % [_trends.current_name(), _trends.visits_left, _trends.name_of(_trends.next_id())])
+		else:
+			lines.append("Тренд: ещё не открыты (откроются с %d-го гостя)" % (_intro.trends_at_guest if _intro != null else 10))
 		lines.append("Цель: сильных рецептов %s%s" % [_goal.progress_text(_state.recipes), " — ВЫПОЛНЕНА" if _goal.is_complete(_state.recipes) else ""])
 	lines.append("FPS: %d" % int(Engine.get_frames_per_second()))
 	lines.append("")
@@ -2484,3 +2544,270 @@ func _on_book_load_requested(recipe_id: String) -> void:
 func _on_recipe_committed(result: Dictionary) -> void:
 	_refresh_objective()
 	GameLog.info("recipes", "Рецепт '%s' %s" % [result["recipe_id"], "создан" if result["is_new"] else "использован повторно"])
+
+
+# --- M11: профили, автосохранение, название кальянной ----------------------------------------
+
+const AUTOSAVE_INTERVAL := 15.0
+var _autosave_timer := 0.0
+var _reloading := false
+var _profile_menu: ProfileMenu = null
+var _profile_button: Button = null
+var _name_dialog: BarNameDialog = null
+var _pause_menu: PauseMenu = null
+
+
+## Профиль ещё не выбран: показываем главное меню со списком профилей.
+func _show_profile_gate() -> void:
+	set_process(false)
+	set_process_input(false)
+	set_process_unhandled_input(false)
+	_show_main_menu()
+
+
+## Главное меню: «Играть» открывает список профилей, «Выйти из игры» закрывает игру.
+func _show_main_menu() -> void:
+	var menu := MainMenu.new()
+	menu.setup()
+	menu.play_requested.connect(func() -> void: _open_profile_menu(false))
+	menu.quit_requested.connect(func() -> void: get_tree().quit())
+	menu.settings_requested.connect(_open_settings)
+	$UI/Root.add_child(menu)
+
+
+## Делает профиль активным и перезагружает сцену: Main при старте сам загрузит его в GameState.
+func _enter_profile(id: String) -> void:
+	if id.is_empty() or not _save.begin_profile(id):
+		return
+	_reloading = true
+	get_tree().reload_current_scene.call_deferred()
+
+
+func _setup_profiles() -> void:
+	if _save == null or not _save.autosave_enabled:
+		return
+	_profile_button = Button.new()
+	_profile_button.text = "☰"
+	_profile_button.tooltip_text = "Профили и меню"
+	_profile_button.focus_mode = Control.FOCUS_NONE
+	_profile_button.add_theme_font_size_override("font_size", 28)
+	_profile_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_profile_button.offset_left = 152.0
+	_profile_button.offset_top = 126.0
+	_profile_button.offset_right = 208.0
+	_profile_button.offset_bottom = 178.0
+	_profile_button.pressed.connect(func() -> void: _open_profile_menu(true))
+	$UI/Root.add_child(_profile_button)
+	_apply_bar_name()
+
+
+func _profile_menu_open() -> bool:
+	return _profile_menu != null or _pause_menu != null
+
+
+func _open_profile_menu(in_game: bool) -> void:
+	if _profile_menu != null:
+		return
+	if in_game:
+		_autosave()
+	var menu := ProfileMenu.new()
+	menu.set_meta("can_rename", in_game and _state != null and _state.get_flag(ProgressionGoal.DONE_FLAG, false) == true)
+	menu.setup(_save.store(), ProgressionGoal.load_default(), _save.active_profile_id(), true)
+	menu.play_requested.connect(_on_profile_play)
+	menu.create_requested.connect(_on_profile_create)
+	menu.reset_requested.connect(_on_profile_reset)
+	menu.delete_requested.connect(_on_profile_delete)
+	menu.rename_requested.connect(func(_id: String) -> void:
+		_close_profile_menu()
+		_prompt_bar_name())
+	menu.closed.connect(_close_profile_menu)
+	$UI/Root.add_child(menu)
+	_profile_menu = menu
+	if in_game:
+		_set_furniture_pause(true)
+		_update_input_lock()
+
+
+func _close_profile_menu() -> void:
+	if _profile_menu == null:
+		return
+	_profile_menu.queue_free()
+	_profile_menu = null
+	_set_furniture_pause(false)
+	_update_input_lock()
+
+
+func _on_profile_play(id: String) -> void:
+	_autosave()
+	_enter_profile(id)
+
+
+func _on_profile_create() -> void:
+	var store := _save.store()
+	if not store.can_create():
+		return
+	_autosave()
+	_enter_profile(store.create())
+
+
+## Очистка прогресса: профиль остаётся в списке. Активный профиль перезапускается с нуля.
+func _on_profile_reset(id: String) -> void:
+	_save.store().reset(id)
+	if id == _save.active_profile_id():
+		_reloading = true
+		_enter_profile(id)
+	elif _profile_menu != null:
+		_profile_menu.refresh()
+
+
+func _on_profile_delete(id: String) -> void:
+	_save.store().delete(id)
+	if id == _save.active_profile_id():
+		_save.leave_profile()
+		_reloading = true
+		get_tree().reload_current_scene.call_deferred()
+	elif _profile_menu != null:
+		_profile_menu.refresh()
+
+
+func _autosave() -> void:
+	if _reloading or _state == null or _save == null:
+		return
+	_save.save_game()
+
+
+func _tick_autosave(delta: float) -> void:
+	_autosave_timer += delta
+	if _autosave_timer >= AUTOSAVE_INTERVAL:
+		_autosave_timer = 0.0
+		_autosave()
+
+
+func _apply_bar_name() -> void:
+	if _state == null or _save == null or not _save.persistence_enabled():
+		return
+	var title := "Hookah Empire"
+	if not _state.bar_name.is_empty():
+		title += " — " + _state.bar_name
+	DisplayServer.window_set_title(title)
+
+
+## Окно «Назови кальянную»; результат запоминается в профиле и показывается в списке профилей.
+func _prompt_bar_name() -> void:
+	if _name_dialog != null or _state == null:
+		return
+	_carrying = true
+	_update_input_lock()
+	var dialog := BarNameDialog.new()
+	dialog.setup(_state.bar_name)
+	var result := {"name": ""}
+	dialog.finished.connect(func(chosen: String) -> void:
+		result["name"] = chosen
+		_notice_closed.emit())
+	$UI/Root.add_child(dialog)
+	_name_dialog = dialog
+	_notice_overlay = dialog
+	_notice_timer = 0.0
+	_notice_hold = true
+	_set_furniture_pause(true)
+	await _notice_closed
+	dialog.queue_free()
+	_name_dialog = null
+	_notice_overlay = null
+	_notice_hold = false
+	_set_furniture_pause(false)
+	_carrying = false
+	_update_input_lock()
+	var cleaned := ProfileStore.clean_name(str(result["name"]))
+	if cleaned.is_empty():
+		return
+	_state.bar_name = cleaned
+	_apply_bar_name()
+	_notify("🪔 Твоя кальянная теперь называется «%s»" % cleaned)
+	_autosave()
+
+
+# --- Меню паузы (Esc) ---
+
+func _open_pause_menu() -> void:
+	if _pause_menu != null or _profile_menu != null or _save == null or not _save.persistence_enabled():
+		return
+	if _furniture_open() or _name_dialog != null or _notice_overlay != null or (_viewer != null and _viewer.visible):
+		return
+	var menu := PauseMenu.new()
+	menu.setup()
+	menu.resume_requested.connect(_close_pause_menu)
+	menu.profiles_requested.connect(func() -> void:
+		_remove_pause_menu()
+		_open_profile_menu(true))
+	menu.main_menu_requested.connect(_on_pause_main_menu)
+	menu.settings_requested.connect(_open_settings)
+	menu.stats_requested.connect(_toggle_stats_over_pause)
+	menu.quit_requested.connect(_on_pause_quit)
+	$UI/Root.add_child(menu)
+	_pause_menu = menu
+	_autosave()
+	_set_furniture_pause(true)
+	_update_input_lock()
+
+
+## Статистика из паузы: панель открывается поверх окна паузы (справа), повторное нажатие скрывает.
+func _toggle_stats_over_pause() -> void:
+	if _stats_panel == null:
+		return
+	_stats_panel.toggle()
+	if _stats_panel.visible:
+		_stats_panel.get_parent().move_child(_stats_panel, -1)
+		_stats_panel.refresh()
+
+
+func _remove_pause_menu() -> void:
+	if _pause_menu == null:
+		return
+	if _stats_panel != null:
+		_stats_panel.visible = false
+	_pause_menu.queue_free()
+	_pause_menu = null
+
+
+func _close_pause_menu() -> void:
+	_remove_pause_menu()
+	_set_furniture_pause(false)
+	_update_input_lock()
+
+
+func _on_pause_main_menu() -> void:
+	_autosave()
+	_reloading = true
+	_save.leave_profile()
+	get_tree().reload_current_scene.call_deferred()
+
+
+func _on_pause_quit() -> void:
+	_autosave()
+	_reloading = true
+	get_tree().quit()
+
+
+# --- Настройки ---
+
+var _settings_menu: SettingsMenu = null
+
+
+func _open_settings() -> void:
+	if _settings_menu != null:
+		return
+	var menu := SettingsMenu.new()
+	var current := DEFAULT_VOLUME_PERCENT
+	if _save != null:
+		current = float(_save.load_setting(VOLUME_SETTING, DEFAULT_VOLUME_PERCENT))
+	menu.setup(current)
+	menu.volume_changed.connect(_set_volume_percent)
+	menu.volume_committed.connect(func(percent: float) -> void:
+		if _save != null:
+			_save.save_setting(VOLUME_SETTING, percent))
+	menu.closed.connect(func() -> void:
+		menu.queue_free()
+		_settings_menu = null)
+	$UI/Root.add_child(menu)
+	_settings_menu = menu

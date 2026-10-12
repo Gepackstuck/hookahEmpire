@@ -34,12 +34,23 @@ func _ready() -> void:
 ## Строки разбора для карточки: [название, значение, вес или ""] — отдельно от UI, чтобы тестировать.
 static func breakdown_rows(verdict: Dictionary, weights: Dictionary) -> Array[Array]:
 	var rows: Array[Array] = []
+	if not bool(verdict.get("trend_enabled", true)):
+		# Без трендов веса остальных компонентов пересчитаны так, чтобы в сумме давать 100%.
+		var rest := 0.0
+		for key in weights:
+			if key != "trend_fit":
+				rest += float(weights[key])
+		var scaled := {}
+		for key in weights:
+			scaled[key] = float(weights[key]) / rest if rest > 0.0 and key != "trend_fit" else 0.0
+		weights = scaled
 	rows.append(["Качество рецепта", "%.1f" % float(verdict["recipe_quality"]), _percent(weights.get("recipe_quality", 0.0))])
 	rows.append(["Вкус гостя", "%.1f" % float(verdict["guest_fit"]), _percent(weights.get("guest_fit", 0.0))])
 	var trend_title := "Тренд"
 	if not str(verdict.get("trend_name", "")).is_empty():
 		trend_title = "Тренд: %s" % str(verdict["trend_name"])
-	rows.append([trend_title, "%.1f" % float(verdict["trend_fit"]), _percent(weights.get("trend_fit", 0.0))])
+	if bool(verdict.get("trend_enabled", true)):
+		rows.append([trend_title, "%.1f" % float(verdict["trend_fit"]), _percent(weights.get("trend_fit", 0.0))])
 	rows.append(["Исполнение", "%.1f" % float(verdict["execution"]), _percent(weights.get("execution", 0.0))])
 	if float(verdict.get("heat_penalty", 0.0)) > 0.0:
 		rows.append(["Штраф за жар", "−%.1f" % float(verdict["heat_penalty"]), ""])
@@ -79,6 +90,8 @@ func open(summary: Dictionary) -> void:
 		_grid.add_child(UiStyle.label(str(row[2]), 20, UiStyle.MUTED))
 	_phrase_label.text = "«%s»" % str(summary.get("phrase", ""))
 	_payment_label.text = "Оплата: +%d ₽" % int(verdict["payment"])
+	if bool(verdict.get("manual", false)):
+		_payment_label.text += "  (ручная работа: +25%)"
 	visible = true
 	_next_button.grab_focus()
 

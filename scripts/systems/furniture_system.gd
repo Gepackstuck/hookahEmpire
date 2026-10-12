@@ -181,6 +181,15 @@ func gift_entry(item_id: String) -> Dictionary:
 	return {}
 
 
+## Сколько предметов данного вида расставлено (подарки не считаются).
+func placed_count(item_id: String) -> int:
+	var count := 0
+	for entry in placed_entries():
+		if str(entry.get("item", "")) == item_id and not bool(entry.get("gift", false)):
+			count += 1
+	return count
+
+
 ## Расставлено предметов, кроме подарков.
 func placed_non_gift_count() -> int:
 	var count := 0

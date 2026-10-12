@@ -61,6 +61,18 @@ func is_in_progress_of(guest_id: String, progress: String) -> bool:
 	return progress == base + "_arrives" or progress == base + "_intro_done"
 
 
+## Прогресс «гость в середине визита» (`<...>_arrives` / `<...>_intro_done`) после загрузки сохранения
+## откатывается к условию прихода этого гостя (его бит запустится заново). Остальной прогресс не меняется.
+func rewind_progress(progress: String) -> String:
+	var arrives := progress
+	if progress.ends_with("_intro_done"):
+		arrives = progress.trim_suffix("_intro_done") + "_arrives"
+	for beat in beats:
+		if str(beat["sets_progress"]) == arrives:
+			return str(beat["requires_progress"])
+	return progress
+
+
 func _parse(data: Dictionary) -> void:
 	var raw: Variant = data.get("beats")
 	if not (raw is Array):

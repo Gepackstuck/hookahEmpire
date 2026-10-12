@@ -1,6 +1,6 @@
 class_name PreparationScreen
 extends Control
-## Окно быстрого приготовления: выбор рецепта, пять параметров кнопками-вариантами, результат.
+## Окно приготовления: выбор рецепта, выбор режима (переключатели / вручную), затем пять параметров и результат.
 ## Окно только собирает запрос и показывает результат; расчёт и запись делает PreparationService.
 
 signal closed
@@ -32,6 +32,11 @@ var _pending_result: Dictionary = {}
 var cost_info: Callable = Callable()
 var _prepare_button: Button
 var _manual_button: Button
+## Выбор режима: две большие карточки; переключатели появляются только после выбора «Переключателями».
+var _mode_box: VBoxContainer
+var _switch_box: VBoxContainer
+var _quick_card: Button
+var _quick_tag: Label
 var _quick_locked := false
 var _affordable := true
 var _quick_hint := ""
@@ -59,6 +64,7 @@ func open() -> void:
 	visible = true
 	_result_box.visible = false
 	_pending_result = {}
+	_show_mode_stage()
 	_refresh_recipes()
 
 
@@ -118,26 +124,48 @@ func _build() -> void:
 	_recipe_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_form.add_child(_recipe_info)
 
-	for entry in _service.config.parameters:
-		_form.add_child(_make_parameter_row(entry))
+	_mode_box = VBoxContainer.new()
+	_mode_box.add_theme_constant_override("separation", 12)
+	_form.add_child(_mode_box)
+	var mode_title := UiStyle.label("Как будем готовить?", 28, UiStyle.GOLD)
+	_mode_box.add_child(mode_title)
+	var cards := HBoxContainer.new()
+	cards.add_theme_constant_override("separation", 20)
+	_mode_box.add_child(cards)
+	_quick_card = _make_mode_card("🎚", "Переключателями",
+		"Выставляешь упаковку, фольгу, отверстия, угли и розжиг — кальян забьётся автоматически.",
+		"⚡ Быстро: результат сразу")
+	_quick_card.pressed.connect(_show_switch_stage)
+	cards.add_child(_quick_card)
+	_quick_tag = _quick_card.get_meta("tag") as Label
+	_manual_button = _make_mode_card("✋", "Вручную",
+		"Сам набиваешь чашу, кладёшь фольгу и раскладываешь угли — мини-игра с реальными действиями.",
+		"💰 +25% к оплате за визит")
+	_manual_button.tooltip_text = "+25% к оплате: если кальян забиваешь сам (вручную), а не автоматом, гость ценит ручную работу и платит на 25% больше итоговой суммы за визит."
+	_manual_button.pressed.connect(_on_manual_pressed)
+	cards.add_child(_manual_button)
 
+	_switch_box = VBoxContainer.new()
+	_switch_box.add_theme_constant_override("separation", 12)
+	_switch_box.visible = false
+	_form.add_child(_switch_box)
+	_switch_box.add_child(UiStyle.label("🎚 Настрой забивку", 28, UiStyle.GOLD))
+	for entry in _service.config.parameters:
+		_switch_box.add_child(_make_parameter_row(entry))
 	var prepare_row := HBoxContainer.new()
 	prepare_row.add_theme_constant_override("separation", 14)
-	_form.add_child(prepare_row)
-	var prepare_button := Button.new()
-	_prepare_button = prepare_button
-	prepare_button.text = "🎚 Приготовить переключателями"
-	prepare_button.custom_minimum_size = Vector2(0, 52)
-	prepare_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	prepare_button.pressed.connect(_on_prepare_pressed)
-	prepare_row.add_child(prepare_button)
-	var manual_button := Button.new()
-	_manual_button = manual_button
-	manual_button.text = "✋ Приготовить вручную"
-	manual_button.custom_minimum_size = Vector2(0, 52)
-	manual_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	manual_button.pressed.connect(_on_manual_pressed)
-	prepare_row.add_child(manual_button)
+	_switch_box.add_child(prepare_row)
+	var back_button := Button.new()
+	back_button.text = "← Выбор режима"
+	back_button.custom_minimum_size = Vector2(260, 52)
+	back_button.pressed.connect(_show_mode_stage)
+	prepare_row.add_child(back_button)
+	_prepare_button = Button.new()
+	_prepare_button.text = "🎚 Приготовить"
+	_prepare_button.custom_minimum_size = Vector2(0, 52)
+	_prepare_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_prepare_button.pressed.connect(_on_prepare_pressed)
+	prepare_row.add_child(_prepare_button)
 
 	_result_box = VBoxContainer.new()
 	_result_box.add_theme_constant_override("separation", 10)
@@ -159,12 +187,62 @@ func _build() -> void:
 	_result_box.add_child(_result_lines)
 	var again_button := Button.new()
 	again_button.text = "↩ Изменить и приготовить ещё раз"
-	again_button.pressed.connect(func() -> void: _result_box.visible = false; _form.visible = true)
+	again_button.pressed.connect(func() -> void:
+		_result_box.visible = false
+		_form.visible = true
+		_show_switch_stage())
 	_result_box.add_child(again_button)
 	_serve_button = Button.new()
 	_serve_button.custom_minimum_size = Vector2(0, 52)
 	_serve_button.pressed.connect(_on_serve_pressed)
 	_result_box.add_child(_serve_button)
+
+
+## Большая карточка режима: иконка, название, описание и «выгода» внизу. Дополнительная метка — в meta "tag".
+func _make_mode_card(icon: String, title: String, description: String, tag: String) -> Button:
+	var card := Button.new()
+	card.custom_minimum_size = Vector2(0, 210)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.focus_mode = Control.FOCUS_NONE
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 18)
+	card.add_child(margin)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(box)
+	var head := UiStyle.label("%s  %s" % [icon, title], 32, UiStyle.GOLD)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(head)
+	var body := UiStyle.label(description, 21)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(380, 0)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(body)
+	var tag_label := UiStyle.label(tag, 22, OK_COLOR)
+	tag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(tag_label)
+	card.set_meta("tag", tag_label)
+	return card
+
+
+func _show_mode_stage() -> void:
+	if _mode_box == null:
+		return
+	_mode_box.visible = true
+	_switch_box.visible = false
+
+
+func _show_switch_stage() -> void:
+	if _quick_locked or not _affordable:
+		return
+	_mode_box.visible = false
+	_switch_box.visible = true
+	_sync_options()
 
 
 func _make_parameter_row(entry: Dictionary) -> Control:
@@ -278,12 +356,24 @@ func set_quick_locked(locked: bool, hint: String = "") -> void:
 
 
 func _apply_quick_lock() -> void:
-	if _prepare_button == null:
+	if _quick_card == null:
 		return
+	_quick_card.disabled = not _affordable or _quick_locked
+	if _quick_locked:
+		_quick_tag.text = "🔒 %s" % (_quick_hint if _quick_hint != "" else "Пока недоступно")
+		_quick_tag.add_theme_color_override("font_color", WARN_COLOR)
+	else:
+		_quick_tag.text = "⚡ Быстро: результат сразу"
+		_quick_tag.add_theme_color_override("font_color", OK_COLOR)
 	_prepare_button.disabled = not _affordable or _quick_locked
-	_prepare_button.text = ("🔒 %s" % _quick_hint) if _quick_locked and _quick_hint != "" else "🎚 Приготовить переключателями"
 	_manual_button.disabled = not _affordable
-	# Пока быстрый режим закрыт, настройки забивки (переключатели) тоже недоступны.
+	if not _affordable:
+		_quick_card.tooltip_text = "Не хватает денег на ингредиенты."
+	else:
+		_quick_card.tooltip_text = ""
+	# Пока быстрый режим закрыт, переключатели тоже недоступны (и сами скрыты).
+	if _quick_locked and _switch_box != null and _switch_box.visible:
+		_show_mode_stage()
 	for parameter_id in _option_buttons:
 		var buttons: Dictionary = _option_buttons[parameter_id]
 		for option_id in buttons:

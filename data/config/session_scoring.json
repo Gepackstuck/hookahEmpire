@@ -109,6 +109,7 @@
     "max": 300,
     "min": 0,
     "exponent": 1.5,
-    "round_to": 5
+    "round_to": 5,
+    "manual_multiplier": 1.25
   }
 }
