@@ -68,6 +68,7 @@ var _hidden_props: Dictionary = {}
 
 func setup(definition: Dictionary) -> void:
 	object_id = definition["id"]
+	add_to_group("garage_objects")
 	name = "Obj_%s" % object_id
 	_visual = definition["visual"]
 	_footprint = definition["size"]
@@ -86,6 +87,8 @@ func setup(definition: Dictionary) -> void:
 			top_y = -float(_visual.get("height", 24.0)) - 6.0
 		"chair":
 			top_y = -50.0
+		"plant":
+			top_y = -(52.0 + 40.0 * float(_visual.get("height_scale", 0.0))) - 10.0
 		"couch":
 			top_y = -52.0
 		"bookcase":
@@ -96,6 +99,8 @@ func setup(definition: Dictionary) -> void:
 			top_y = -4.0
 		"wall_picture":
 			top_y = -98.0
+		"window":
+			top_y = -110.0
 		"door":
 			top_y = -float(_visual.get("height", 76.0)) - 6.0
 		"shelf":
@@ -225,6 +230,8 @@ func _draw() -> void:
 			_draw_rug()
 		"wall_picture":
 			_draw_wall_picture()
+		"window":
+			_draw_window()
 		"door":
 			_draw_door()
 		"shelf":
@@ -241,6 +248,8 @@ func _draw() -> void:
 			if _loose_visible:
 				HookahArt.draw_bowl(self, Vector2(0, -_lift) + _loose_pos, _hookah_color, _loose_coals)
 			_draw_coal_fx(Vector2(0, -_lift))
+		"plant":
+			_draw_plant()
 		"emoji", "texture":
 			IsoDraw.draw_shadow(self, 18.0)
 	if _glow_level > 0.0:
@@ -316,12 +325,7 @@ func _draw_table() -> void:
 	var thickness := 6.0
 	var under := height - thickness
 	# Мягкая тень на полу.
-	var pad := 0.12
-	draw_colored_polygon(PackedVector2Array([
-		IsoProjection.grid_to_screen(Vector2(-half.x - pad, -half.y - pad)),
-		IsoProjection.grid_to_screen(Vector2(half.x + pad, -half.y - pad)),
-		IsoProjection.grid_to_screen(Vector2(half.x + pad, half.y + pad)),
-		IsoProjection.grid_to_screen(Vector2(-half.x - pad, half.y + pad))]), Color(0, 0, 0, 0.18))
+	_soft_shadow_rect(half, 0.12, 0.18)
 	# Ножки (дальние первыми).
 	var leg_color := base.darkened(0.5)
 	var inset := 0.14
@@ -567,6 +571,14 @@ func _draw_jar(p: Vector2, color: Color) -> void:
 
 
 func _draw_cup(p: Vector2, color: Color) -> void:
+	if VisualStyle.modern:
+		_ellipse(p + Vector2(0, 1.5), 7.5, 3.0, Color(0.06, 0.02, 0.04, 0.3))
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-6, -13), p + Vector2(6, -13), p + Vector2(4.2, 0.5), p + Vector2(-4.2, 0.5)]), color.darkened(0.7))
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-5, -12), p + Vector2(5, -12), p + Vector2(3.5, 0), p + Vector2(-3.5, 0)]), Color(0.85, 0.93, 1.0, 0.7))
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-4.5, -7), p + Vector2(4.5, -7), p + Vector2(3.5, 0), p + Vector2(-3.5, 0)]), color)
+		draw_line(p + Vector2(3.4, -12), p + Vector2(2.6, -2), Color(1, 1, 1, 0.5), 1.0)
+		_ellipse(p + Vector2(0, -12), 5.0, 1.8, Color(1, 1, 1, 0.7))
+		return
 	_ellipse(p + Vector2(0, 1), 6.0, 2.4, Color(0, 0, 0, 0.22))
 	draw_colored_polygon(PackedVector2Array([p + Vector2(-5, -12), p + Vector2(5, -12), p + Vector2(3.5, 0), p + Vector2(-3.5, 0)]), Color(0.85, 0.93, 1.0, 0.75))
 	draw_colored_polygon(PackedVector2Array([p + Vector2(-4.4, -7), p + Vector2(4.4, -7), p + Vector2(3.5, 0), p + Vector2(-3.5, 0)]), color)
@@ -630,6 +642,15 @@ func _draw_boombox(p: Vector2, index: int) -> void:
 
 
 func _draw_coals(p: Vector2) -> void:
+	if VisualStyle.modern:
+		_ellipse(p + Vector2(0, 1.5), 13.0, 5.4, Color(0.06, 0.02, 0.04, 0.3))
+		_ellipse(p + Vector2(0, -1), 12.0, 5.0, Color("#23262c"))
+		_ellipse(p + Vector2(0, -2.5), 10.5, 4.2, Color("#4a4f58"))
+		_ellipse(p + Vector2(0, -3.5), 9.0, 3.5, Color("#2a2d33"))
+		for offset in [Vector2(-5, -5), Vector2(0, -6.5), Vector2(5, -4.5)]:
+			draw_rect(Rect2(p + offset, Vector2(4.5, 3.4)), Color("#15171b"))
+			draw_rect(Rect2(p + offset + Vector2(0.8, 0.0), Vector2(2.8, 1.2)), Color("#ff8a3a"))
+		return
 	_ellipse(p + Vector2(0, 1), 12.0, 5.0, Color(0, 0, 0, 0.25))
 	_ellipse(p + Vector2(0, -2), 11.0, 4.6, Color("#4a4f58"))
 	_ellipse(p + Vector2(0, -3), 9.5, 3.8, Color("#2f3238"))
@@ -640,6 +661,9 @@ func _draw_coals(p: Vector2) -> void:
 
 ## Параллелепипед по координатам клеток относительно центра объекта (min/max) и высотам z0..z1 (px).
 func _draw_iso_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Color, offset: Vector2 = Vector2.ZERO) -> void:
+	if VisualStyle.modern:
+		_draw_iso_box_modern(min_c, max_c, z0, z1, color, offset)
+		return
 	var north := IsoProjection.grid_to_screen(Vector2(min_c.x, min_c.y)) + offset
 	var east := IsoProjection.grid_to_screen(Vector2(max_c.x, min_c.y)) + offset
 	var south := IsoProjection.grid_to_screen(Vector2(max_c.x, max_c.y)) + offset
@@ -649,6 +673,245 @@ func _draw_iso_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: 
 	draw_colored_polygon(PackedVector2Array([west + low, south + low, south + high, west + high]), color.darkened(0.35))
 	draw_colored_polygon(PackedVector2Array([south + low, east + low, east + high, south + high]), color.darkened(0.2))
 	draw_colored_polygon(PackedVector2Array([north + high, east + high, south + high, west + high]), color.lightened(0.1))
+
+
+## Новый вид: насыщенные грани с холодной тенью слева, светлая верхняя грань, тонкий контур и блик на рёбрах.
+func _draw_iso_box_modern(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Color, offset: Vector2) -> void:
+	var north := IsoProjection.grid_to_screen(Vector2(min_c.x, min_c.y)) + offset
+	var east := IsoProjection.grid_to_screen(Vector2(max_c.x, min_c.y)) + offset
+	var south := IsoProjection.grid_to_screen(Vector2(max_c.x, max_c.y)) + offset
+	var west := IsoProjection.grid_to_screen(Vector2(min_c.x, max_c.y)) + offset
+	var low := Vector2(0, -z0)
+	var high := Vector2(0, -z1)
+	var shade_tint := Color("#2b1a2e")
+	var left_face := color.lerp(shade_tint, 0.34).darkened(0.1)
+	var right_face := color.lerp(shade_tint, 0.14)
+	var top_face := color.lightened(0.17)
+	draw_colored_polygon(PackedVector2Array([west + low, south + low, south + high, west + high]), left_face)
+	draw_colored_polygon(PackedVector2Array([south + low, east + low, east + high, south + high]), right_face)
+	draw_colored_polygon(PackedVector2Array([north + high, east + high, south + high, west + high]), top_face)
+	var line := color.lerp(shade_tint, 0.7).darkened(0.35)
+	line.a = 0.8
+	draw_polyline(PackedVector2Array([west + low, west + high, north + high, east + high, east + low, south + low, west + low]), line, 1.0)
+	draw_line(south + low, south + high, line, 1.0)
+	draw_polyline(PackedVector2Array([west + high, south + high, east + high]), top_face.lightened(0.35), 1.4)
+
+
+## Вывеска включается: появляется и несколько раз мигает, прежде чем гореть ровно.
+func flicker_in() -> void:
+	visible = true
+	for alpha: float in [0.0, 1.0, 0.15, 1.0, 0.4, 1.0]:
+		modulate.a = alpha
+		await get_tree().create_timer(0.14).timeout
+	modulate.a = 1.0
+
+
+## Растение в горшке в мягком стиле: круглый горшок с каймой и пышный куст широких округлых листьев с тёмным контуром.
+func _draw_plant() -> void:
+	var k := 1.0 + float(_visual.get("height_scale", 0.0))
+	IsoDraw.draw_shadow(self, 16.0 * k)
+	var pot := Color.html(str(_visual.get("pot", "#b9694a")))
+	var leaf := Color.html(str(_visual.get("color", "#4f9b55")))
+	var outline := leaf.darkened(0.65)
+	# Горшок: ободок и скруглённое тело, левая половина темнее.
+	_ellipse(Vector2(0, -1), 10.0, 3.6, pot.darkened(0.5))
+	var body := PackedVector2Array([Vector2(-11, -21), Vector2(11, -21), Vector2(8.5, -4), Vector2(0, -1), Vector2(-8.5, -4)])
+	draw_colored_polygon(body, pot.darkened(0.1))
+	draw_colored_polygon(PackedVector2Array([Vector2(1, -21), Vector2(11, -21), Vector2(8.5, -4), Vector2(1, -1.5)]), pot.darkened(0.28))
+	draw_polyline(PackedVector2Array([Vector2(-11, -21), Vector2(-8.5, -4), Vector2(0, -1), Vector2(8.5, -4), Vector2(11, -21)]), pot.darkened(0.55), 1.2)
+	_ellipse(Vector2(0, -22), 12.5, 4.0, pot.lightened(0.08))
+	_ellipse(Vector2(0, -22.5), 10.0, 2.8, Color("#3a2a20"))
+	# Листья: овальные, с центральной жилкой, сзади тёмные, спереди светлые.
+	var leaves := [[-1.0, 0.8, 0], [1.0, 0.8, 0], [-0.55, 1.1, 1], [0.55, 1.1, 1], [0.0, 1.25, 2], [-0.95, 0.6, 3], [0.95, 0.6, 3]]
+	leaves.sort_custom(func(x: Array, y: Array) -> bool: return int(x[2]) < int(y[2]))
+	for entry: Array in leaves:
+		var angle: float = float(entry[0]) * 1.0
+		var length: float = 24.0 * float(entry[1]) * k
+		var width: float = 8.5 * (0.85 + 0.15 * k)
+		var base := Vector2(0, -23)
+		var dir := Vector2(sin(angle), -cos(angle))
+		var normal := Vector2(cos(angle), sin(angle))
+		var tip := base + dir * length
+		var points := PackedVector2Array()
+		for step in 9:
+			var t := float(step) / 8.0
+			var half := sin(t * PI) * width * (1.0 - 0.25 * t)
+			points.append(base + dir * length * t + normal * half)
+		for step in range(8, -1, -1):
+			var t := float(step) / 8.0
+			var half := sin(t * PI) * width * (1.0 - 0.25 * t)
+			points.append(base + dir * length * t - normal * half)
+		var tone := leaf.darkened(0.12 * float(3 - int(entry[2])) * 0.5).lightened(0.05 * float(entry[2]))
+		draw_colored_polygon(points, tone)
+		draw_polyline(PackedVector2Array(points.slice(0, 9)), outline, 1.0)
+		draw_polyline(PackedVector2Array(points.slice(9, 18)), outline, 1.0)
+		draw_line(base, tip, tone.lightened(0.18), 1.0)
+
+
+## Большое окно в стене: тонкая рама, вечернее небо с луной, силуэты города, переплёт, подоконник.
+func _draw_window() -> void:
+	var frame := Color.html(str(_visual.get("color", "#3b2a24")))
+	var z0 := 26.0
+	var z1 := 98.0
+	var outer := PackedVector2Array([_wall_point(0.05, z0), _wall_point(0.95, z0), _wall_point(0.95, z1), _wall_point(0.05, z1)])
+	draw_colored_polygon(outer, frame)
+	var i0 := z0 + 4.0
+	var i1 := z1 - 4.0
+	# Каждое окно — свой вид: по id объекта выбирается сцена (закат с луной, глубокая ночь, рассвет с солнцем) и свой силуэт города.
+	var variant := int(_visual.get("scene", absi(object_id.hash()) % 3)) % 3
+	var shift := int(absi(object_id.hash()) % 97)
+	var palettes := [
+		[Color("#d98fb0"), Color("#6f68b8"), Color("#26306a"), Color("#2a2350")],
+		[Color("#3b4f9a"), Color("#1d2a62"), Color("#0b0f2a"), Color("#12142e")],
+		[Color("#ffc58a"), Color("#e88fa8"), Color("#6a74c4"), Color("#3a3566")],
+	]
+	var palette: Array = palettes[variant]
+	var sky_low: Color = palette[0]
+	var sky_mid: Color = palette[1]
+	var sky_high: Color = palette[2]
+	var skyline: Color = palette[3]
+	var mid_z := i0 + (i1 - i0) * 0.45
+	draw_polygon(PackedVector2Array([_wall_point(0.08, i0), _wall_point(0.92, i0), _wall_point(0.92, mid_z), _wall_point(0.08, mid_z)]),
+		PackedColorArray([sky_low, sky_low, sky_mid, sky_mid]))
+	draw_polygon(PackedVector2Array([_wall_point(0.08, mid_z), _wall_point(0.92, mid_z), _wall_point(0.92, i1), _wall_point(0.08, i1)]),
+		PackedColorArray([sky_mid, sky_mid, sky_high, sky_high]))
+	var body_t := 0.25 + 0.5 * fract_hash_local(shift)
+	if bool(_visual.get("moon", variant == 0)):
+		var moon := _wall_point(body_t, i1 - 20.0)
+		draw_circle(moon, 8.0, Color(1.0, 0.95, 0.8, 0.25))
+		draw_circle(moon, 5.0, Color("#fff4cf"))
+	elif variant == 2:
+		var sun := _wall_point(body_t, i0 + 24.0)
+		draw_circle(sun, 11.0, Color(1.0, 0.85, 0.5, 0.3))
+		draw_circle(sun, 6.5, Color("#fff0b8"))
+	if variant != 2:
+		for k in 8:
+			draw_circle(_wall_point(0.12 + 0.76 * fract_hash_local(k + shift), mid_z + 6.0 + (i1 - mid_z - 10.0) * fract_hash_local(k + 9 + shift)), 1.0, Color(1.0, 0.95, 0.8, 0.8))
+	# Силуэты домов с тёплыми окошками (у каждого окна своя застройка).
+	var count := 6 + variant
+	var step := 0.84 / float(count)
+	for k in count:
+		var t0 := 0.08 + step * float(k)
+		var t1 := minf(t0 + step * (0.85 + 0.3 * fract_hash_local(k + shift * 3)), 0.92)
+		var h := 10.0 + 24.0 * fract_hash_local(k + 3 + shift)
+		draw_colored_polygon(PackedVector2Array([_wall_point(t0, i0), _wall_point(t1, i0), _wall_point(t1, i0 + h), _wall_point(t0, i0 + h)]), skyline)
+		if variant != 2 and fract_hash_local(k + 20 + shift) > 0.3:
+			draw_circle(_wall_point((t0 + t1) * 0.5, i0 + h * 0.5), 1.3, Color("#ffd98a"))
+	# Тонкий переплёт.
+	var line := frame.lightened(0.15)
+	draw_line(_wall_point(0.5, i0), _wall_point(0.5, i1), line, 1.6)
+	draw_line(_wall_point(0.08, (i0 + i1) * 0.5), _wall_point(0.92, (i0 + i1) * 0.5), line, 1.6)
+	draw_polyline(PackedVector2Array([outer[0], outer[1], outer[2], outer[3], outer[0]]), frame.lightened(0.3), 1.2)
+	# Подоконник.
+	draw_colored_polygon(PackedVector2Array([_wall_point(0.02, z0 - 3.0), _wall_point(0.98, z0 - 3.0), _wall_point(0.98, z0 + 2.0), _wall_point(0.02, z0 + 2.0)]), frame.lightened(0.2))
+
+
+static func fract_hash_local(value: int) -> float:
+	return fposmod(sin(float(value) * 12.9898) * 43758.5453, 1.0)
+
+
+## Источники света этого объекта для слоя освещения нового вида (глобальные координаты).
+func light_sources() -> Array:
+	if not is_visible_in_tree():
+		return []
+	match str(_visual.get("type", "")):
+		"lamp":
+			return [{"kind": "lamp", "pos": global_position, "color": Color.html(str(_visual.get("color", "#ffd98a")))}]
+		"hookah":
+			# Кальян с углями светится: тлеющий уголь и колба; при затяжке (сплющивание) свет вспыхивает ярче.
+			if _hookah_top < 2:
+				return []
+			var coal_k: float = [0.35, 0.65, 1.0][clampi(_coal_state, 0, 2)]
+			return [{"kind": "hookah", "pos": global_position + Vector2(0, -_lift - 52.0), "tint": _hookah_color, "puff": clampf(_hookah_squash, 0.0, 1.0), "coal": coal_k}]
+		"table":
+			var result: Array = []
+			for offset: Vector2 in _pendant_offsets():
+				result.append({"kind": "table", "pos": global_position + IsoProjection.grid_to_screen(offset), "height": float(_visual.get("height", 26.0)), "color": Color(1.0, 0.72, 0.42)})
+			return result
+		"shelf":
+			return [{"kind": "shelf", "pos": global_position + Vector2(0, -34), "color": Color(1.0, 0.72, 0.4)}]
+		"neon_sign":
+			if not _neon:
+				return []
+			return [_neon_light()]
+		"window":
+			var half := Vector2(_footprint) * 0.5
+			return [{"kind": "window", "pos": global_position + IsoProjection.grid_to_screen(Vector2(-half.x, 0.0)), "radius": 46.0 * float(_footprint.y)}]
+	return []
+
+
+## Геометрия неоновой вывески для отражения: основание у стены, направление вдоль стены и в комнату.
+func _neon_light() -> Dictionary:
+	var half := Vector2(_footprint) * 0.5
+	var step := Vector2(IsoProjection.CELL_W * 0.5, IsoProjection.CELL_H * 0.5)
+	var left_wall := str(_visual.get("wall", "right")) == "left"
+	var x_dir: Vector2
+	var width: float
+	var origin: Vector2
+	var inward: Vector2
+	if left_wall:
+		x_dir = Vector2(step.x, -step.y).normalized()
+		width = (float(_footprint.y) - 0.5) * step.length()
+		origin = IsoProjection.grid_to_screen(Vector2(-half.x, half.y - 0.25))
+		inward = Vector2(step.x, step.y)
+	else:
+		x_dir = step.normalized()
+		width = (float(_footprint.x) - 0.5) * step.length()
+		origin = IsoProjection.grid_to_screen(Vector2(-half.x + 0.25, -half.y))
+		inward = Vector2(-step.x, step.y)
+	var z0 := float(_visual.get("z", 50.0))
+	var panel_h := float(_visual.get("panel_height", 56.0))
+	var lines: Array = _visual.get("lines", [])
+	var color_a := Color.html(str(lines[0].get("color", "#35e0ff"))) if lines.size() > 0 else Color("#35e0ff")
+	var color_b := Color.html(str(lines[lines.size() - 1].get("color", "#ff3fa4"))) if lines.size() > 0 else color_a
+	var blinks := false
+	for line: Dictionary in lines:
+		if bool(line.get("blink", false)):
+			blinks = true
+	var intensity := 1.0 if (not blinks or _neon_lit(_neon_time)) else 0.55
+	var corners := PackedVector2Array([
+		origin + Vector2(0, -z0), origin + x_dir * width + Vector2(0, -z0),
+		origin + x_dir * width + Vector2(0, -z0 - panel_h), origin + Vector2(0, -z0 - panel_h)])
+	for index in corners.size():
+		corners[index] = to_global(corners[index])
+	return {
+		"kind": "neon", "corners": corners, "base": to_global(origin), "along": x_dir,
+		"inward": inward.normalized() * IsoProjection.CELL_W * 0.5 * 1.0,
+		"width": width, "color_a": color_a, "color_b": color_b, "intensity": intensity,
+	}
+
+
+## Где над столом висят лампы (в клетках от центра): одна, а над длинным столом — две.
+func _pendant_offsets() -> Array[Vector2]:
+	var along_x := _footprint.x >= _footprint.y
+	var length := float(maxi(_footprint.x, _footprint.y))
+	if length >= 3.0:
+		var step := length * 0.25
+		return [Vector2(-step, 0.0), Vector2(step, 0.0)] if along_x else [Vector2(0.0, -step), Vector2(0.0, step)]
+	return [Vector2.ZERO]
+
+
+## Подвесная лампа над столом (новый вид): шнур, абажур и лампочка; сам свет рисует GarageLighting.
+func _draw_pendants(height: float) -> void:
+	for offset: Vector2 in _pendant_offsets():
+		var at := IsoProjection.grid_to_screen(offset) + Vector2(0, -height - 82.0)
+		draw_line(at + Vector2(0, -40.0), at + Vector2(0, -6.0), Color(0.12, 0.08, 0.08, 0.9), 1.4)
+		draw_colored_polygon(PackedVector2Array([at + Vector2(-9, 0), at + Vector2(9, 0), at + Vector2(4.5, -9), at + Vector2(-4.5, -9)]), Color("#3a2a2a"))
+		draw_line(at + Vector2(-9, 0), at + Vector2(9, 0), Color("#e0b070"), 1.2)
+		draw_circle(at + Vector2(0, 2.5), 3.0, Color(1.0, 0.92, 0.7))
+
+
+## Мягкая тень на полу: в новом виде несколько слоёв убывающей прозрачности.
+func _soft_shadow_rect(half: Vector2, pad: float, alpha: float) -> void:
+	var layers := 2 if VisualStyle.modern else 1
+	for layer in layers:
+		var grow := pad + float(layers - 1 - layer) * 0.07
+		var layer_alpha := alpha if layers == 1 else alpha * 0.6
+		draw_colored_polygon(PackedVector2Array([
+			IsoProjection.grid_to_screen(Vector2(-half.x - grow, -half.y - grow)),
+			IsoProjection.grid_to_screen(Vector2(half.x + grow, -half.y - grow)),
+			IsoProjection.grid_to_screen(Vector2(half.x + grow, half.y + grow)),
+			IsoProjection.grid_to_screen(Vector2(-half.x - grow, half.y + grow))]), Color(0.06, 0.02, 0.04, layer_alpha))
 
 
 ## Дверь в стене x = 0: тёмный проём, косяк и полотно, которое поворачивается в комнату (петли со стороны -y).
@@ -681,8 +944,17 @@ func _draw_door() -> void:
 		var p1 := hinge_s.lerp(free_s, 0.86)
 		draw_colored_polygon(PackedVector2Array([
 			p0 + Vector2(0, -z_range.x), p1 + Vector2(0, -z_range.x), p1 + Vector2(0, -z_range.y), p0 + Vector2(0, -z_range.y)]), panel)
+	if VisualStyle.modern:
+		# Тёплый блик на филёнках и тонкая золотая окантовка полотна.
+		for z_range: Vector2 in [Vector2(8.0, 34.0), Vector2(40.0, 66.0)]:
+			var q0 := hinge_s.lerp(free_s, 0.14)
+			var q1 := hinge_s.lerp(free_s, 0.86)
+			draw_line(q0 + Vector2(0, -z_range.y), q1 + Vector2(0, -z_range.y), Color(1.0, 0.8, 0.5, 0.35 * shade), 1.0)
+		draw_polyline(PackedVector2Array([hinge_s, free_s, free_s + up * 0.96, hinge_s + up * 0.96, hinge_s]), Color(0.95, 0.78, 0.5, 0.5 * shade), 1.0)
 	# Ручка.
 	draw_circle(hinge_s.lerp(free_s, 0.88) + Vector2(0, -38.0), 2.6, Color("#e3c25a").darkened(1.0 - shade))
+	if VisualStyle.modern:
+		draw_circle(hinge_s.lerp(free_s, 0.88) + Vector2(-0.7, -38.7), 0.9, Color(1, 1, 1, 0.8 * shade))
 	# Косяк и притолока.
 	var frame := Color("#5b3c25")
 	draw_line(a, a + up, frame, 4.0)
@@ -704,12 +976,7 @@ func _draw_chair() -> void:
 
 ## M9: мягкая тень на полу под мебелью (прямоугольник чуть больше основания).
 func _floor_shadow(pad: float = 0.1, alpha: float = 0.18) -> void:
-	var half := Vector2(_footprint) * 0.5
-	draw_colored_polygon(PackedVector2Array([
-		IsoProjection.grid_to_screen(Vector2(-half.x - pad, -half.y - pad)),
-		IsoProjection.grid_to_screen(Vector2(half.x + pad, -half.y - pad)),
-		IsoProjection.grid_to_screen(Vector2(half.x + pad, half.y + pad)),
-		IsoProjection.grid_to_screen(Vector2(-half.x - pad, half.y + pad))]), Color(0, 0, 0, alpha))
+	_soft_shadow_rect(Vector2(_footprint) * 0.5, pad, alpha)
 
 
 ## M9: диван — ножки, сплошное основание, сиденье, спинка с дальней стороны (-y, а при повороте -x) и два подлокотника.
@@ -789,8 +1056,14 @@ func _draw_lamp() -> void:
 	draw_circle(Vector2(0, -70), 28.0, Color(shade.r, shade.g, shade.b, 0.12))
 	draw_colored_polygon(PackedVector2Array([Vector2(-9, -1), Vector2(0, -5), Vector2(9, -1), Vector2(0, 3)]), Color("#2c2c34"))
 	draw_line(Vector2(0, -2), Vector2(0, -66), Color("#3b3b46"), 3.0)
-	draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(14, -62), Vector2(9, -86), Vector2(-9, -86)]), shade.darkened(0.15))
-	draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(0, -60), Vector2(0, -86), Vector2(-9, -86)]), shade.lightened(0.15))
+	if VisualStyle.modern:
+		# Светильник: абажур светится изнутри мягким тёплым светом.
+		draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(14, -62), Vector2(9, -86), Vector2(-9, -86)]), shade.lightened(0.28))
+		draw_colored_polygon(PackedVector2Array([Vector2(-9, -66), Vector2(9, -66), Vector2(6, -82), Vector2(-6, -82)]), Color(1.0, 0.97, 0.85, 0.9))
+		draw_line(Vector2(-14, -62), Vector2(14, -62), shade.darkened(0.2), 1.5)
+	else:
+		draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(14, -62), Vector2(9, -86), Vector2(-9, -86)]), shade.darkened(0.15))
+		draw_colored_polygon(PackedVector2Array([Vector2(-14, -62), Vector2(0, -60), Vector2(0, -86), Vector2(-9, -86)]), shade.lightened(0.15))
 	draw_line(Vector2(-9, -86), Vector2(9, -86), shade.lightened(0.4), 1.5)
 
 
@@ -901,7 +1174,7 @@ func _chair_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Col
 func sort_rect() -> Rect2:
 	var rect := Rect2(_anchor_grid - Vector2(_footprint) * 0.5, Vector2(_footprint))
 	var visual_type := str(_visual.get("type", ""))
-	if visual_type == "neon_sign" or visual_type == "wall_picture":
+	if visual_type == "neon_sign" or visual_type == "wall_picture" or visual_type == "window":
 		if _footprint.x >= _footprint.y:
 			rect.size.y = 0.0
 		else:
@@ -1010,11 +1283,19 @@ func _draw_sink() -> void:
 	var e := IsoProjection.grid_to_screen(Vector2(half.x - inset.x, -half.y + inset.y)) + top
 	var so := IsoProjection.grid_to_screen(Vector2(half.x - inset.x, half.y - inset.y)) + top
 	var w := IsoProjection.grid_to_screen(Vector2(-half.x + inset.x, half.y - inset.y)) + top
-	draw_colored_polygon(PackedVector2Array([n, e, so, w]), base.darkened(0.5))
 	var center := (n + so) * 0.5
 	var shrink := 0.7
-	draw_colored_polygon(PackedVector2Array([center.lerp(n, shrink), center.lerp(e, shrink), center.lerp(so, shrink), center.lerp(w, shrink)]), base.darkened(0.65))
-	draw_polyline(PackedVector2Array([n, e, so, w, n]), base.lightened(0.4), 1.2)
+	if VisualStyle.modern:
+		# Нержавеющая чаша: светлый борт, тёмная глубина, блик по краю.
+		draw_colored_polygon(PackedVector2Array([n, e, so, w]), base.lightened(0.25))
+		draw_colored_polygon(PackedVector2Array([center.lerp(n, 0.82), center.lerp(e, 0.82), center.lerp(so, 0.82), center.lerp(w, 0.82)]), base.darkened(0.45))
+		draw_colored_polygon(PackedVector2Array([center.lerp(n, shrink), center.lerp(e, shrink), center.lerp(so, shrink), center.lerp(w, shrink)]), base.darkened(0.7))
+		draw_polyline(PackedVector2Array([w, n, e]), Color(1, 1, 1, 0.5), 1.4)
+		draw_circle(center + Vector2(0, 1), 1.6, Color("#101318"))
+	else:
+		draw_colored_polygon(PackedVector2Array([n, e, so, w]), base.darkened(0.5))
+		draw_colored_polygon(PackedVector2Array([center.lerp(n, shrink), center.lerp(e, shrink), center.lerp(so, shrink), center.lerp(w, shrink)]), base.darkened(0.65))
+		draw_polyline(PackedVector2Array([n, e, so, w, n]), base.lightened(0.4), 1.2)
 	# Кран.
 	var tap_base := IsoProjection.grid_to_screen(Vector2(0.0, -half.y + 0.16)) + top
 	var steel := Color("#cfd8de")
@@ -1023,6 +1304,10 @@ func _draw_sink() -> void:
 	draw_line(tap_base, pipe_top, steel, 2.6)
 	draw_line(pipe_top, spout_end, steel, 2.6)
 	draw_line(pipe_top + Vector2(-4, 2), pipe_top + Vector2(4, 2), steel.darkened(0.2), 2.0)
+	if VisualStyle.modern:
+		draw_line(tap_base + Vector2(-0.8, 0), pipe_top + Vector2(-0.8, 0), Color(1, 1, 1, 0.6), 0.9)
+		draw_circle(spout_end, 1.8, steel.lightened(0.3))
+		draw_circle(tap_base + Vector2(0, -3), 2.2, Color("#d89a4a"))
 	if _washing:
 		var water := Color(0.65, 0.86, 1.0, 0.95)
 		var splash_at := center
@@ -1079,10 +1364,19 @@ func _draw_wall_book() -> void:
 	var corner_b: Vector2 = wall.call(0.98, bottom_z - 6.0)
 	_book_hit = Rect2(Vector2(minf(corner_a.x, corner_b.x), minf(corner_a.y, corner_b.y)), Vector2(absf(corner_b.x - corner_a.x), absf(corner_b.y - corner_a.y))).grow(3.0)
 	var parchment := Color("#e9dcb4")
+	if VisualStyle.modern:
+		parchment = Color("#f2e6c0")
+		# Тёплое сияние вокруг свитка (его подсвечивает лампа).
+		var centre: Vector2 = wall.call(0.5, (top_z + bottom_z) * 0.5)
+		draw_texture_rect(VisualStyle.soft_disc(), Rect2(centre - Vector2(70, 56), Vector2(140, 112)), false, Color(1.0, 0.8, 0.45, 0.4))
 	# Тень от свитка и сам пергамент (чуть волнистые края).
 	poly.call([[0.14, bottom_z - 2.0], [0.88, bottom_z - 2.0], [0.88, top_z - 2.0], [0.14, top_z - 2.0]], Color(0, 0, 0, 0.18))
 	poly.call([[0.12, bottom_z], [0.5, bottom_z - 1.0], [0.88, bottom_z], [0.9, (top_z + bottom_z) * 0.5], [0.88, top_z], [0.12, top_z], [0.1, (top_z + bottom_z) * 0.5]], parchment)
 	poly.call([[0.5, bottom_z - 1.0], [0.88, bottom_z], [0.9, (top_z + bottom_z) * 0.5], [0.88, top_z], [0.5, top_z]], parchment.darkened(0.05))
+	if VisualStyle.modern:
+		draw_polyline(PackedVector2Array([wall.call(0.12, bottom_z), wall.call(0.5, bottom_z - 1.0), wall.call(0.88, bottom_z), wall.call(0.9, (top_z + bottom_z) * 0.5), wall.call(0.88, top_z), wall.call(0.12, top_z), wall.call(0.1, (top_z + bottom_z) * 0.5), wall.call(0.12, bottom_z)]), Color(0.42, 0.27, 0.14, 0.75), 1.2)
+		# Золотой заголовок свитка.
+		poly.call([[0.34, top_z - 4.0], [0.66, top_z - 4.0], [0.66, top_z - 6.5], [0.34, top_z - 6.5]], Color("#c9a24e"))
 	# Строки рецептов и значок.
 	var ink := Color(0.3, 0.19, 0.1, 0.8)
 	for row in 5:
@@ -1115,7 +1409,10 @@ func _draw_wall_book() -> void:
 		draw_polyline(outline, Color(1.0, 0.88, 0.3), 2.0, true)
 	# Лампа над свитком: латунный рожок и тёплый свет.
 	var lamp: Vector2 = wall.call(0.5, height - 8.0)
-	draw_colored_polygon(PackedVector2Array([lamp, wall.call(0.08, bottom_z + 6.0), wall.call(0.92, bottom_z + 6.0)]), Color(1.0, 0.82, 0.45, 0.14))
+	if not VisualStyle.modern:
+		draw_colored_polygon(PackedVector2Array([lamp, wall.call(0.08, bottom_z + 6.0), wall.call(0.92, bottom_z + 6.0)]), Color(1.0, 0.82, 0.45, 0.14))
+	else:
+		draw_texture_rect(VisualStyle.soft_disc(), Rect2(lamp - Vector2(26, 10), Vector2(52, 24)), false, Color(1.0, 0.85, 0.5, 0.55))
 	draw_line(wall.call(0.5, height - 13.0), lamp, Color("#b88a3a"), 2.0)
 	draw_colored_polygon(_ellipse_points(lamp + Vector2(0, -2), 6.0, 2.6), Color("#e8c46a"))
 	draw_colored_polygon(_ellipse_points(lamp + Vector2(0, -1), 3.4, 1.4), Color("#fff3c4"))
@@ -1566,7 +1863,7 @@ func _draw_shelf() -> void:
 			PackedColorArray([warm, warm, clear, clear]))
 		draw_line(left + Vector2(0, -z_top + 1.0), right + Vector2(0, -z_top + 1.0), Color(1.0, 0.95, 0.75, 0.9), 1.5)
 	# Доски (низ, средние, верх) и левая стойка рамы.
-	var wood := frame.lightened(0.18)
+	var wood := frame.lightened(0.3 if VisualStyle.modern else 0.18)
 	_draw_iso_box(Vector2(-half.x, -depth), Vector2(-half.x + 0.1, depth), 0.0, height, frame)
 	for plank_index in planks.size() - 1:
 		var plank_z := float(planks[plank_index])

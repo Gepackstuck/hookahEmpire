@@ -184,6 +184,9 @@ func _build_confirm() -> void:
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(8)
 	style.set_content_margin_all(16)
+	if VisualStyle.modern:
+		style = UiStyle.panel_style()
+		style.set_content_margin_all(18)
 	panel.add_theme_stylebox_override("panel", style)
 	center.add_child(panel)
 	var column := VBoxContainer.new()
@@ -239,6 +242,12 @@ func show_toast(text: String, seconds: float = 2.6) -> void:
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(8)
 	style.set_content_margin_all(12)
+	if VisualStyle.modern:
+		style.bg_color = Color(0.085, 0.12, 0.1, 0.94)
+		style.border_color = Color(0.55, 0.95, 0.65, 0.8)
+		style.set_corner_radius_all(14)
+		style.shadow_size = 6
+		style.shadow_color = Color(0, 0, 0, 0.4)
 	panel.add_theme_stylebox_override("panel", style)
 	var label := Label.new()
 	label.text = text
@@ -444,6 +453,13 @@ func _card_style(highlight: bool) -> StyleBoxFlat:
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(6)
 	style.set_content_margin_all(5)
+	if VisualStyle.modern:
+		style.bg_color = Color(0.2, 0.12, 0.27, 0.95) if highlight else Color(0.12, 0.07, 0.17, 0.95)
+		style.border_color = Color(0.95, 0.78, 0.5, 0.95) if highlight else Color(0.95, 0.78, 0.5, 0.28)
+		style.set_corner_radius_all(14)
+		style.set_content_margin_all(8)
+		style.shadow_size = 4
+		style.shadow_color = Color(0, 0, 0, 0.3)
 	return style
 
 

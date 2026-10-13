@@ -108,6 +108,28 @@ func _draw_grid() -> void:
 		var y := float(j) * 0.5
 		var color := GRID_COLOR if j % 2 == 0 else HALF_GRID_COLOR
 		_grid_node.draw_dashed_line(IsoProjection.grid_to_screen(Vector2(0, y)), IsoProjection.grid_to_screen(Vector2(w, y)), color, 1.0, 5.0)
+	_draw_wall_hint(w, h)
+
+
+## Подсказка при расстановке: стены, к которым можно поставить предмет (диван — только спинкой к стене, картина — на любую).
+func _draw_wall_hint(w: int, h: int) -> void:
+	if not _placing:
+		return
+	var item := system.item(_place_item)
+	var back_wall := Color(1.0, 0.82, 0.35, 0.85)
+	var left_wall := back_wall
+	if bool(item.get("wall_back", false)):
+		# Диван: при повороте 0 — к дальней стене (y = 0), при повороте 1 — к левой (x = 0).
+		if _place_rotation == 0:
+			left_wall = Color(0, 0, 0, 0)
+		else:
+			back_wall = Color(0, 0, 0, 0)
+	elif str(item.get("placement", "floor")) != "wall":
+		return
+	if back_wall.a > 0.0:
+		_grid_node.draw_line(IsoProjection.grid_to_screen(Vector2(0, 0)), IsoProjection.grid_to_screen(Vector2(w, 0)), back_wall, 4.0, true)
+	if left_wall.a > 0.0:
+		_grid_node.draw_line(IsoProjection.grid_to_screen(Vector2(0, 0)), IsoProjection.grid_to_screen(Vector2(0, h)), left_wall, 4.0, true)
 
 
 func set_selected(uid: String) -> void:
@@ -250,6 +272,8 @@ func begin_placement(uid: String, dragging: bool = false) -> void:
 	_placing = true
 	_ghost_key = ""
 	_problem = "init"
+	if _grid_node != null:
+		_grid_node.queue_redraw()
 	if _nodes.has(uid):
 		(_nodes[uid] as Node2D).visible = false
 	set_process(true)
@@ -261,6 +285,8 @@ func cancel_placement(emit: bool = true) -> void:
 		return
 	_placing = false
 	_dragging = false
+	if _grid_node != null:
+		_grid_node.queue_redraw()
 	set_process(_selection_enabled)
 	set_process_unhandled_input(_selection_enabled)
 	if _nodes.has(_place_uid):
@@ -278,6 +304,8 @@ func cancel_placement(emit: bool = true) -> void:
 func rotate_placement() -> void:
 	if _placing and bool(system.item(_place_item)["rotation_allowed"]):
 		_place_rotation = (_place_rotation + 1) % 2
+		if _grid_node != null:
+			_grid_node.queue_redraw()
 
 
 ## Клетка, к которой привязан предмет под мышью (центр предмета у курсора; у стенных предметов — к стене).

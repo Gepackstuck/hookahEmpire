@@ -78,12 +78,18 @@ static func _bezier(points: Array) -> PackedVector2Array:
 
 ## top = TOP_WATERED: чаши ещё нет (только тарелка), но в колбу уже налита вода.
 const TOP_WATERED := -1
+## Несут одну колбу (без кальяна): пустую / с водой.
+const TOP_FLASK_EMPTY := -2
+const TOP_FLASK_WATERED := -3
 
 ## Кальян: origin — точка на поверхности под центром колбы. squash — «затяжка» (0..1) приседает кальян.
 ## with_hose — рисовать длинный шланг (на столе; в руках и на полке кальян без шланга).
 ## top — что стоит на кальяне: 0 — только тарелка (кальян не забит), 1 — чаша без углей, 2 — чаша с углями.
 ## Вода в колбе (и пузырьки при затяжке, squash > 0) — только у забитого кальяна (top >= 1).
 static func draw_hookah(canvas: CanvasItem, origin: Vector2, color: Color, with_hose: bool = true, squash: float = 0.0, handle_style: int = 0, tilt: float = 0.0, top: int = 0, heat_state: int = 1) -> void:
+	if top <= TOP_FLASK_EMPTY:
+		draw_flask(canvas, origin, color, top == TOP_FLASK_WATERED, tilt)
+		return
 	var stretch := Vector2(SCALE * (1.0 + 0.04 * squash), SCALE * (1.0 - 0.06 * squash))
 	canvas.draw_set_transform(origin, tilt, stretch)
 	_draw_hookah_shape(canvas, color, with_hose, Transform2D(tilt, stretch, 0.0, origin), handle_style, top, squash, heat_state)
@@ -98,28 +104,9 @@ static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool
 	_ellipse(canvas, p + Vector2(0, 1), 12.0, 4.6, Color(0, 0, 0, 0.25))
 	if with_hose:
 		var hose_back := _bezier([p + Vector2(8, -43), p + Vector2(34, -46), p + Vector2(31, -6), p + Vector2(18, 0)])
-		canvas.draw_polyline(hose_back, color.darkened(0.45), 2.9, true)
+		canvas.draw_polyline(hose_back, color.darkened(0.45), 2.3 if VisualStyle.modern else 2.9, true)
 		canvas.draw_polyline(hose_back, color, 1.7, true)
-	# Колба: узкое горло, шар, талия, основание (профиль: [высота, полуширина]).
-	var profile: Array = [[-28.0, 3.4], [-25.0, 4.1], [-22.0, 6.8], [-18.0, 7.9], [-14.0, 6.0], [-10.0, 5.6], [-6.0, 7.5], [-2.0, 10.1], [0.0, 10.9]]
-	var outer := PackedVector2Array()
-	var inner := PackedVector2Array()
-	for point: Array in profile:
-		outer.append(p + Vector2(float(point[1]), float(point[0])))
-		inner.append(p + Vector2(float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
-	for i in range(profile.size() - 1, -1, -1):
-		var point: Array = profile[i]
-		outer.append(p + Vector2(-float(point[1]), float(point[0])))
-		inner.append(p + Vector2(-float(point[1]) * 0.76, float(point[0]) * 0.97 - 0.5))
-	canvas.draw_colored_polygon(outer, color.darkened(0.45))
-	canvas.draw_colored_polygon(inner, color)
-	if top >= 1 or top == TOP_WATERED:
-		_draw_water(canvas, p, color, bubbling)
-	var pattern := color.lightened(0.4)
-	pattern.a = 0.55
-	for spot: Vector2 in [Vector2(-3, -17), Vector2(3, -13), Vector2(-5, -5), Vector2(1, -4), Vector2(6, -6)]:
-		canvas.draw_colored_polygon(PackedVector2Array([p + spot + Vector2(0, -2), p + spot + Vector2(1.3, 0), p + spot + Vector2(0, 2), p + spot + Vector2(-1.3, 0)]), pattern)
-	_ellipse(canvas, p + Vector2(-4, -17), 1.4, 4.0, Color(1, 1, 1, 0.4))
+	_draw_flask_body(canvas, p, color, top >= 1 or top == TOP_WATERED, bubbling)
 	canvas.draw_rect(Rect2(p + Vector2(-11, -2.5), Vector2(22, 3.5)), black)
 	# Шахта с «пузырями» и воротником.
 	canvas.draw_rect(Rect2(p + Vector2(-5, -31), Vector2(10, 4)), black)
@@ -136,10 +123,55 @@ static func _draw_hookah_shape(canvas: CanvasItem, color: Color, with_hose: bool
 		_bowl_shape(canvas, p + Vector2(0, -58), color, top >= 2, heat_state)
 	if with_hose:
 		var hose_front := _bezier([p + Vector2(18, 0), p + Vector2(6, 8), p + Vector2(-11, 9), p + Vector2(-19, 3)])
-		canvas.draw_polyline(hose_front, color.darkened(0.45), 2.9, true)
+		canvas.draw_polyline(hose_front, color.darkened(0.45), 2.3 if VisualStyle.modern else 2.9, true)
 		canvas.draw_polyline(hose_front, color, 1.7, true)
 		# Ручка на конце шланга (как у остальных кальянов), лежит на столе влево-вниз; длина ~11 px на экране.
 		draw_handle(canvas, p + Vector2(-19, 3), Vector2(-1.0, 0.25).normalized(), handle_style, 11.0 / 22.0 / SCALE, base)
+
+
+## Только колба (стекло, узор, чёрное основание и горлышко): её несут к раковине отдельно от кальяна.
+static func _draw_flask_body(canvas: CanvasItem, p: Vector2, color: Color, watered: bool, bubbling: float = 0.0) -> void:
+	var black := Color("#1c1d22")
+	# Колба: узкое горло, шар, талия, основание (профиль: [высота, полуширина]).
+	var profile: Array = [[-28.0, 3.4], [-25.0, 4.1], [-22.0, 6.8], [-18.0, 7.9], [-14.0, 6.0], [-10.0, 5.6], [-6.0, 7.5], [-2.0, 10.1], [0.0, 10.9]]
+	# В новом виде стенка колбы тонкая — контур не съедает цвет стекла.
+	var wall_k := 0.92 if VisualStyle.modern else 0.76
+	var outer := PackedVector2Array()
+	var inner := PackedVector2Array()
+	for point: Array in profile:
+		outer.append(p + Vector2(float(point[1]), float(point[0])))
+		inner.append(p + Vector2(float(point[1]) * wall_k, float(point[0]) * 0.97 - 0.5))
+	for i in range(profile.size() - 1, -1, -1):
+		var point: Array = profile[i]
+		outer.append(p + Vector2(-float(point[1]), float(point[0])))
+		inner.append(p + Vector2(-float(point[1]) * wall_k, float(point[0]) * 0.97 - 0.5))
+	canvas.draw_colored_polygon(outer, color.darkened(0.45))
+	canvas.draw_colored_polygon(inner, color)
+	if VisualStyle.modern:
+		# Глянец стекла: тёмный контур колбы и два блика.
+		var rim := outer.duplicate()
+		rim.append(outer[0])
+		canvas.draw_polyline(rim, Color(0.05, 0.03, 0.06, 0.55), 0.7, true)
+		canvas.draw_line(p + Vector2(-4.6, -19.0), p + Vector2(-5.6, -8.0), Color(1, 1, 1, 0.5), 1.4, true)
+		_ellipse(canvas, p + Vector2(4.2, -4.5), 1.1, 2.2, Color(1, 1, 1, 0.3))
+	if watered:
+		_draw_water(canvas, p, color, bubbling)
+	var pattern := color.lightened(0.4)
+	pattern.a = 0.55
+	for spot: Vector2 in [Vector2(-3, -17), Vector2(3, -13), Vector2(-5, -5), Vector2(1, -4), Vector2(6, -6)]:
+		canvas.draw_colored_polygon(PackedVector2Array([p + spot + Vector2(0, -2), p + spot + Vector2(1.3, 0), p + spot + Vector2(0, 2), p + spot + Vector2(-1.3, 0)]), pattern)
+	_ellipse(canvas, p + Vector2(-4, -17), 1.4, 4.0, Color(1, 1, 1, 0.4))
+	canvas.draw_rect(Rect2(p + Vector2(-11, -2.5), Vector2(22, 3.5)), black)
+	canvas.draw_rect(Rect2(p + Vector2(-5, -31), Vector2(10, 4)), black)
+	canvas.draw_rect(Rect2(p + Vector2(-2.2, -35), Vector2(4.4, 5)), black)
+
+
+## Колба в руках: top == TOP_FLASK_EMPTY — пустая, TOP_FLASK_WATERED — с водой.
+static func draw_flask(canvas: CanvasItem, origin: Vector2, color: Color, watered: bool, tilt: float = 0.0) -> void:
+	var stretch := Vector2(SCALE * 1.15, SCALE * 1.15)
+	canvas.draw_set_transform(origin, tilt, stretch)
+	_draw_flask_body(canvas, Vector2.ZERO, color, watered)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Вода в колбе (светлая заливка до уровня -15); при затяжке (bubbling > 0) поднимаются пузырьки.
@@ -208,6 +240,9 @@ static func draw_bowl(canvas: CanvasItem, p: Vector2, color: Color, coals: bool)
 static func draw_jar(canvas: CanvasItem, p: Vector2, color: Color) -> void:
 	var tin := Color("#e7e3da")
 	var lid := Color("#2a2c33")
+	if VisualStyle.modern:
+		_draw_jar_modern(canvas, p, color, tin, lid)
+		return
 	_ellipse(canvas, p + Vector2(0, 1), 9.0, 3.4, Color(0, 0, 0, 0.22))
 	canvas.draw_rect(Rect2(p + Vector2(-7.5, -10), Vector2(15, 10)), tin)
 	_ellipse(canvas, p, 7.5, 3.0, tin)
@@ -225,6 +260,26 @@ static func draw_jar(canvas: CanvasItem, p: Vector2, color: Color) -> void:
 	_ellipse(canvas, p + Vector2(0, -13.5), 7.8, 3.1, lid.lightened(0.12))
 	_ellipse(canvas, p + Vector2(0, -13.7), 5.4, 2.1, lid.lightened(0.04))
 	canvas.draw_arc(p + Vector2(0, -13.7), 5.4, PI * 1.1, PI * 1.6, 8, Color(1, 1, 1, 0.25), 1.0)
+
+
+## Банка табака в новом виде: мягкая тень, тёмный контур, цветная этикетка, крышка с бликом.
+static func _draw_jar_modern(canvas: CanvasItem, p: Vector2, color: Color, tin: Color, lid: Color) -> void:
+	var outline := color.darkened(0.7)
+	_ellipse(canvas, p + Vector2(0, 1.5), 10.5, 4.0, Color(0.06, 0.02, 0.04, 0.3))
+	_ellipse(canvas, p + Vector2(0, 0.5), 9.2, 3.5, outline)
+	canvas.draw_rect(Rect2(p + Vector2(-8.5, -11), Vector2(17, 11)), outline)
+	_ellipse(canvas, p, 8.5, 3.3, tin.darkened(0.1))
+	canvas.draw_rect(Rect2(p + Vector2(-7.5, -10), Vector2(15, 10)), tin)
+	_ellipse(canvas, p, 7.5, 3.0, tin)
+	canvas.draw_rect(Rect2(p + Vector2(-7.5, -8), Vector2(15, 6.5)), color)
+	_ellipse(canvas, p + Vector2(0, -1.5), 7.5, 3.0, color.darkened(0.08))
+	_ellipse(canvas, p + Vector2(0.5, -4.8), 2.6, 1.6, Color(1, 1, 1, 0.85))
+	canvas.draw_rect(Rect2(p + Vector2(-7.5, -10), Vector2(2.6, 10)), Color(0, 0, 0, 0.16))
+	canvas.draw_rect(Rect2(p + Vector2(4.3, -10), Vector2(1.4, 10)), Color(1, 1, 1, 0.25))
+	_ellipse(canvas, p + Vector2(0, -10.5), 8.4, 3.4, outline)
+	canvas.draw_rect(Rect2(p + Vector2(-8.2, -14), Vector2(16.4, 4)), lid)
+	_ellipse(canvas, p + Vector2(0, -14), 8.2, 3.2, lid.lightened(0.14))
+	canvas.draw_arc(p + Vector2(0, -14.2), 5.6, PI * 1.1, PI * 1.6, 8, Color(1, 1, 1, 0.3), 1.0)
 
 
 ## Стальные щипцы для углей, лежащие на столе: пружинная головка и две раскрытые ручки с лопаточками.

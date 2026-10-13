@@ -332,7 +332,9 @@ func set_carrying_hookah(color: Color, top: int = 0) -> void:
 	_carried.visible = false
 	_carried_hookah.color = color
 	_carried_hookah.top = top
-	_carried_hookah.position = Vector2(_carry_side() * 17.0, -2.0)
+	# Одну колбу держат повыше (на уровне груди), чтобы её было видно из-за стола.
+	var lift := -26.0 if top <= HookahArt.TOP_FLASK_EMPTY else -2.0
+	_carried_hookah.position = Vector2(_carry_side() * 17.0, lift)
 	_carried_hookah.visible = true
 	_carried_hookah.queue_redraw()
 

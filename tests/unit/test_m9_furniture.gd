@@ -72,6 +72,29 @@ func test_ring_is_free_sees_neighbors() -> void:
 	state.free()
 
 
+const COUCH_ITEM := {"id": "couch", "name": "Диван", "price": 10, "grid_size": [3, 1], "rotation_allowed": true, "placement": "floor", "blocks": true, "wall_back": true, "visual": {"type": "couch"}}
+
+
+func test_couch_stands_back_to_wall() -> void:
+	var state := GameStateScript.new()
+	var system := _small_system(state, [COUCH_ITEM], [])
+	assert_true(system.check_placement("couch", Vector2(1, 1), 0) != "", "диван посреди зала нельзя")
+	assert_true(system.check_placement("couch", Vector2(1, 0), 0) == "", "диван вдоль задней стены можно")
+	assert_true(system.check_placement("couch", Vector2(0, 0), 1) == "", "диван вдоль левой стены (поворот) можно")
+	assert_true(system.check_placement("couch", Vector2(1, 0), 1) != "", "повёрнутый диван не у левой стены нельзя")
+	state.free()
+
+
+func test_wall_decor_does_not_block_floor_items() -> void:
+	var state := GameStateScript.new()
+	var system := _small_system(state, [COUCH_ITEM], [])
+	# Вывеска на стене занимает клетки 0..2 ряда 0 (в «полу» её нет), а в углу стоит настоящий предмет.
+	system.set_room(Vector2i(5, 3), [Rect2i(0, 0, 3, 1), Rect2i(4, 0, 1, 1)], [], [Rect2i(4, 0, 1, 1)])
+	assert_true(system.check_placement("couch", Vector2(0, 0), 0) == "", "под настенной вывеской можно поставить диван")
+	assert_true(system.check_placement("couch", Vector2(2, 0), 0) != "", "рядом с настоящим предметом клетка занята")
+	state.free()
+
+
 func test_buy_spends_money_and_stores_item() -> void:
 	var state := GameStateScript.new()
 	var system := _make(state, 100)
@@ -135,8 +158,8 @@ func test_wall_items_stick_to_walls() -> void:
 	assert_true(system.check_placement("wall_picture", Vector2i(15, 0), 0) == "", "на заднюю стену можно")
 	assert_true(system.check_placement("wall_picture", Vector2i(15, 1), 0) != "", "в центре комнаты нельзя")
 	assert_true(system.check_placement("wall_picture", Vector2i(10, 0), 0) != "", "поверх неоновой вывески нельзя")
-	assert_true(system.check_placement("wall_picture", Vector2i(0, 9), 1) == "", "на левую стену (поворот) можно")
-	assert_true(system.check_placement("wall_picture", Vector2i(0, 1), 1) != "", "поверх вывески-свитка нельзя")
+	assert_true(system.check_placement("wall_picture", Vector2i(0, 5), 1) == "", "на левую стену (поворот) можно")
+	assert_true(system.check_placement("wall_picture", Vector2i(0, 13), 1) == "", "свободный кусок левой стены между окнами и углом")
 	var uid := str(system.buy("wall_picture")["uid"])
 	assert_true(system.place(uid, Vector2i(15, 0), 0)["ok"])
 	assert_true(system.check_placement("wall_picture", Vector2i(16, 0), 0) != "", "две картины друг на друга нельзя")
@@ -230,7 +253,7 @@ func test_items_can_stand_on_a_rug() -> void:
 	var system := _make(state)
 	var rug := str(system.buy("rug")["uid"])
 	assert_true(system.place(rug, Vector2i(8, 12), 0)["ok"], "ковёр под центром комнаты (захватывает старт игрока)")
-	for item_id in ["chair", "lamp", "plant", "small_table", "couch"]:
+	for item_id in ["chair", "lamp", "plant", "small_table"]:
 		assert_true(system.check_placement(item_id, Vector2i(8, 11), 0) == "" or system.check_placement(item_id, Vector2i(8, 13), 0) == "", "%s можно поставить на ковёр" % item_id)
 	assert_true(system.check_placement("chair", Vector2i(10, 12), 0) != "", "стартовую клетку игрока занимать нельзя даже на ковре")
 	state.free()
@@ -278,12 +301,12 @@ func test_plant_on_shelf() -> void:
 func test_rotate_in_place() -> void:
 	var state := GameStateScript.new()
 	var system := _make(state)
-	var couch := str(system.buy("couch")["uid"])
-	assert_true(system.place(couch, Vector2i(2, 11), 0)["ok"])
-	var result := system.rotate_in_place(couch)
+	var table := str(system.buy("small_table")["uid"])
+	assert_true(system.place(table, Vector2i(2, 11), 0)["ok"])
+	var result := system.rotate_in_place(table)
 	assert_true(result["ok"], str(result))
-	assert_eq(int(system.entry_of(couch)["rotation"]), 1)
-	assert_eq(system.entry_rect(system.entry_of(couch)).size, Vector2(1, 3))
+	assert_eq(int(system.entry_of(table)["rotation"]), 1)
+	assert_eq(system.entry_rect(system.entry_of(table)).size, Vector2(1, 2))
 	var lamp := str(system.buy("lamp")["uid"])
 	system.place(lamp, Vector2i(18, 13), 0)
 	assert_true(not system.rotate_in_place(lamp)["ok"], "торшер не поворачивается")

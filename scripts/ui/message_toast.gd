@@ -7,11 +7,16 @@ extends PanelContainer
 var _tween: Tween = null
 
 
+var _classic: StyleBox
+
+
 func _ready() -> void:
+	_classic = get_theme_stylebox("panel")
 	visible = false
 
 
 func show_message(text: String, duration: float = 2.5) -> void:
+	add_theme_stylebox_override("panel", UiStyle.plate_style(_classic, 18, 22.0, 10.0))
 	_label.text = text
 	visible = true
 	modulate.a = 1.0

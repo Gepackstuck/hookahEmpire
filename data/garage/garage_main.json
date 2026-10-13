@@ -559,36 +559,41 @@
       }
     },
     {
-      "id": "sign_script",
-      "name": "Вывеска",
+      "id": "window_a",
+      "name": "Окно",
       "cell": [
         0,
-        1
+        2
       ],
       "size": [
         1,
-        6
+        3
       ],
       "blocks": false,
       "visual": {
-        "type": "neon_sign",
-        "wall": "left",
-        "panel": "#15110f",
-        "frame": "#e8c46a",
-        "z": 24,
-        "panel_height": 62,
-        "lines": [
-          {
-            "text": "Наши кальяны —",
-            "color": "#ffe9a8",
-            "size": 22
-          },
-          {
-            "text": "крепче, чем ваши отношения",
-            "color": "#ffe9a8",
-            "size": 19
-          }
-        ]
+        "type": "window",
+        "color": "#3b2a24",
+        "scene": 1,
+        "moon": true
+      }
+    },
+    {
+      "id": "window_b",
+      "name": "Окно",
+      "cell": [
+        0,
+        10
+      ],
+      "size": [
+        1,
+        3
+      ],
+      "blocks": false,
+      "visual": {
+        "type": "window",
+        "color": "#3b2a24",
+        "scene": 1,
+        "moon": false
       }
     }
   ],

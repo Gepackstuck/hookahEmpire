@@ -26,6 +26,8 @@ var room_size := Vector2i.ZERO
 ## Сколько предметов со «стола» вернулось на склад после последней уборки/перестановки хозяина (для сообщения игроку).
 var last_detached: int = 0
 var _fixed_rects: Array[Rect2i] = []
+## Постоянные объекты, занимающие пол (без настенных вывесок и картин: под ними мебель ставить можно).
+var _fixed_floor_rects: Array[Rect2i] = []
 var _fixed_blocking: Array[Rect2i] = []
 var _state: Object
 var _economy: EconomySystem
@@ -68,24 +70,30 @@ func item(item_id: String) -> Dictionary:
 
 
 ## Размеры комнаты и занятые клетки: fixed_rects — все объекты гаража (пол и стены), fixed_blocking — те, через которые нельзя ходить.
-func set_room(size: Vector2i, fixed_rects: Array[Rect2i], fixed_blocking: Array[Rect2i]) -> void:
+func set_room(size: Vector2i, fixed_rects: Array[Rect2i], fixed_blocking: Array[Rect2i], fixed_floor_rects: Array[Rect2i] = []) -> void:
 	room_size = size
 	_fixed_rects = fixed_rects.duplicate()
+	_fixed_floor_rects = fixed_floor_rects.duplicate() if not fixed_floor_rects.is_empty() else fixed_rects.duplicate()
 	_fixed_blocking = fixed_blocking.duplicate()
 
 
 ## То же, но из описания гаража (непроходимые объекты + стул игрока).
 func set_room_from_layout(layout: GarageLayout) -> void:
 	var all_rects: Array[Rect2i] = []
+	var floor_rects: Array[Rect2i] = []
 	var blocking: Array[Rect2i] = []
 	for object in layout.objects:
 		var rect := Rect2i(object["cell"], object["size"])
 		all_rects.append(rect)
+		# Картины и окна висят выше мебели, под ними ставить можно. Неоновая вывеска низкая (от 27 px) — диван или растение
+		# перед ней закрывали бы её, поэтому её ряд у стены занят.
+		if not ["wall_picture", "window"].has(str(object["visual"].get("type", ""))):
+			floor_rects.append(rect)
 		if bool(object["blocks"]):
 			blocking.append(rect)
 	if layout.player_seat_cell.x >= 0:
 		blocking.append(Rect2i(layout.player_seat_cell, Vector2i.ONE))
-	set_room(layout.size, all_rects, blocking)
+	set_room(layout.size, all_rects, blocking, floor_rects)
 
 
 # --- Владение ---------------------------------------------------------------
@@ -448,7 +456,11 @@ func _placement_problem(item_id: String, cell: Vector2, rotation: int, ignore_ui
 	var is_wall := str(data["placement"]) == "wall"
 	if is_wall:
 		return _check_wall(rect, rot, ignore_uid)
-	for fixed in _fixed_rects:
+	if bool(data.get("wall_back", false)):
+		# Диван и подобное: спиной к стене (y = 0 без поворота, x = 0 с поворотом) и лицом к залу.
+		if (rot == 0 and rect.position.y != 0.0) or (rot == 1 and rect.position.x != 0.0):
+			return "Ставится вдоль стены, спинкой к ней"
+	for fixed in _fixed_floor_rects:
 		if rect.intersects(_rf(fixed)):
 			return "Здесь уже стоит предмет гаража"
 	for zone in no_build:
@@ -726,6 +738,7 @@ func _parse_item(entry: Variant) -> void:
 		"surface_height": float(entry.get("surface_height", 0.0)),
 		"surface_ok": bool(entry.get("surface_ok", false)),
 		"blocks": bool(entry.get("blocks", true)),
+		"wall_back": bool(entry.get("wall_back", false)),
 		"comfort": int(entry.get("comfort", 0)),
 		"atmosphere": int(entry.get("atmosphere", 0)),
 		"visual": visual,

@@ -3,7 +3,7 @@ extends RefCounted
 ## Загрузка и валидация data-описания гаража (data/garage/*.json).
 ## Ошибки копятся в errors; is_valid() == false означает, что layout использовать нельзя.
 
-const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah", "sink", "wall_book"]
+const VISUAL_TYPES := ["emoji", "texture", "box", "table", "chair", "door", "shelf", "neon_sign", "hookah", "sink", "wall_book", "window", "plant"]
 const PROP_TYPES := ["hookah", "jar", "cup", "coals", "tongs", "napkins", "mouthpiece_box", "mask", "books", "image", "boombox"]
 
 var id: String = ""

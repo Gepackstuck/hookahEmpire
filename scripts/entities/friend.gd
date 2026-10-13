@@ -72,7 +72,15 @@ func setup(id: String, _emoji: String, start_position: Vector2, _sprite_faces_ri
 
 ## Внешность гостя из data/guests (look).
 func apply_look(look: Dictionary) -> void:
+	_figure.generic = GuestGenerator.is_generated(guest_id)
+	_figure.blob_color = VisualStyle.blob_color_for(guest_id)
+	_figure.face_seed = absi(guest_id.hash())
 	_figure.apply_look(look)
+
+
+## Имя над головой: в новом виде его видно только у друзей (у безликих гостей имени нет).
+func set_display_name(display_name: String) -> void:
+	_head.set_name_tag("" if _figure.generic else display_name)
 
 
 func walk_path(path: Array[Vector2]) -> void:

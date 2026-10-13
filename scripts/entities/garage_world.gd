@@ -98,6 +98,10 @@ func _ready() -> void:
 	_layout = layout
 	_grid = GarageGrid.new(layout.size)
 	_backdrop.setup(layout.size)
+	var lighting := GarageLighting.new()
+	lighting.name = "Lighting"
+	add_child(lighting)
+	lighting.setup(layout.size)
 	_serve_cell = layout.hookah_serve_cell
 	_prep_cell = layout.hookah_prep_cell
 	_coal_cell = layout.hookah_coal_cell
@@ -444,6 +448,7 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	_entities.add_child(friend)
 	friend.setup(str(guest["id"]), str(guest["emoji"]), entry_position, str(guest.get("sprite_faces", "right")) == "right")
 	friend.apply_look(guest.get("look", {}))
+	friend.set_display_name(str(guest.get("name", "")))
 	_guest_routes[friend.guest_id] = {"entry_position": entry_position, "entry_cell": entry_cell, "stand_cell": stand_cell}
 	_objects[friend.guest_id] = friend
 	if companion_of != "":
@@ -510,6 +515,7 @@ func spawn_waiting_guest(guest: Dictionary, entry_position: Vector2, entry_cell:
 	_entities.add_child(friend)
 	friend.setup(str(guest["id"]), str(guest.get("emoji", "")), entry_position, str(guest.get("sprite_faces", "right")) == "right")
 	friend.apply_look(guest.get("look", {}))
+	friend.set_display_name(str(guest.get("name", "")))
 	friend.set_meta("waiting_guest", true)
 	var route := {"entry_position": entry_position, "entry_cell": entry_cell, "stand_cell": wait_cell, "waiting": true}
 	if not sofa_seat.is_empty():
@@ -648,6 +654,7 @@ func spawn_buddy(guest: Dictionary, entry_position: Vector2, entry_cell: Vector2
 	_entities.add_child(friend)
 	friend.setup(str(guest["id"]), str(guest.get("emoji", "")), entry_position, false)
 	friend.apply_look(guest.get("look", {}))
+	friend.set_display_name(str(guest.get("name", "")))
 	var buddy := Buddy.new()
 	buddy.name = "Buddy"
 	add_child(buddy)
@@ -1527,10 +1534,23 @@ func set_marker(object_id: String) -> void:
 	_marker.visible = _objects.has(object_id)
 
 
+func show_object(object_id: String) -> void:
+	var node: Variant = _objects.get(object_id)
+	if node is CanvasItem:
+		(node as CanvasItem).visible = true
+
+
 func hide_object(object_id: String) -> void:
 	var node: Variant = _objects.get(object_id)
 	if node is CanvasItem:
 		(node as CanvasItem).visible = false
+
+
+## Вешает скрытый объект на место (вывеска): он включается с миганием.
+func hang_object(object_id: String) -> void:
+	var node: Variant = _objects.get(object_id)
+	if node is GarageObject:
+		await (node as GarageObject).flicker_in()
 
 
 func is_object_visible(object_id: String) -> bool:
@@ -1579,12 +1599,15 @@ func _fill_flask_at_sink() -> void:
 	var basin := sink as GarageObject
 	await _walk_to(basin.front_cell())
 	_player.face_toward(basin.position.x)
+	# Кальян остаётся на стойке рук: к крану подставляют только колбу.
+	_player.set_carrying_hookah(_u.color, HookahArt.TOP_FLASK_EMPTY)
 	basin.set_washing(true, Color(0, 0, 0, 0), "flask")
 	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
-	# Колба наполнилась: вода видна в кальяне, который кальянщик держит в руках.
-	_player.set_carrying_hookah(_u.color, HookahArt.TOP_WATERED)
+	_player.set_carrying_hookah(_u.color, HookahArt.TOP_FLASK_WATERED)
 	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
 	basin.set_washing(false)
+	# Колбу «возвращают» на кальян: дальше несём его целиком, уже с водой.
+	_player.set_carrying_hookah(_u.color, HookahArt.TOP_WATERED)
 
 
 ## Цвет текущего кальяна (взятого с полки).
@@ -1603,6 +1626,13 @@ func set_shelf_extra(count: int) -> void:
 func shelf_hookah_total() -> int:
 	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
 	return (shelf as GarageObject).hookah_slot_count() if shelf is GarageObject else 0
+
+
+## Вид графики переключили в настройках: перерисовываем пол и стены.
+func refresh_visual_style() -> void:
+	if _backdrop != null:
+		_backdrop.queue_redraw()
+	get_tree().call_group("garage_objects", "queue_redraw")
 
 
 func restock_shelf() -> void:

@@ -58,6 +58,16 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
 	var base_alpha := clampf(0.16 + 0.05 * amount, 0.0, 0.4)
+	if VisualStyle.modern:
+		# Новый вид: мягкие пушистые облачка без жёстких краёв, с лёгким сиреневым оттенком.
+		var soft := VisualStyle.soft_disc()
+		for lobe in _lobes:
+			var r := lobe.z * _radius * 1.5
+			var c := Vector2(lobe.x, lobe.y) * _radius
+			draw_texture_rect(soft, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), false, Color(0.86, 0.84, 0.95, base_alpha * 1.5))
+		var core := _radius * 0.9
+		draw_texture_rect(soft, Rect2(Vector2(-core, -core) * 0.5 - Vector2(core, core) * 0.5, Vector2(core, core) * 2.0), false, Color(1, 1, 1, base_alpha))
+		return
 	for lobe in _lobes:
 		draw_circle(Vector2(lobe.x, lobe.y) * _radius, lobe.z * _radius, Color(0.88, 0.88, 0.94, base_alpha))
 	# Светлая сердцевина даёт объём.

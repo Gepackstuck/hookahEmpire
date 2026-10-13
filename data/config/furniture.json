@@ -177,7 +177,8 @@
       "visual": {
         "type": "couch",
         "color": "#5b6fa8"
-      }
+      },
+      "wall_back": true
     },
     {
       "id": "wall_picture",
@@ -221,7 +222,6 @@
     },
     {
       "id": "plant",
-      "icon": "🪴",
       "name": "Растение",
       "price": 70,
       "grid_size": [
@@ -235,11 +235,12 @@
       "comfort": 0,
       "atmosphere": 2,
       "visual": {
-        "type": "emoji",
-        "text": "🪴",
-        "size": 46
+        "type": "plant",
+        "color": "#4f9b55",
+        "pot": "#b9694a"
       },
-      "surface_ok": true
+      "surface_ok": true,
+      "icon": "🪴"
     },
     {
       "id": "rug",
@@ -436,6 +437,73 @@
         "color": "#2a2a2e",
         "texture": "res://art/paintings/troll_point.png",
         "title": "Тролль-указка"
+      }
+    },
+    {
+      "id": "big_plant",
+      "icon": "🌿",
+      "name": "Большое растение",
+      "price": 140,
+      "grid_size": [
+        1,
+        1
+      ],
+      "rotation_allowed": false,
+      "category": "decor",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 0,
+      "atmosphere": 3,
+      "visual": {
+        "type": "plant",
+        "color": "#3f8a4a",
+        "pot": "#7a8a96",
+        "height_scale": 0.5
+      }
+    },
+    {
+      "id": "low_table",
+      "icon": "🟫",
+      "name": "Низкий столик",
+      "price": 90,
+      "grid_size": [
+        2,
+        1
+      ],
+      "rotation_allowed": true,
+      "category": "table",
+      "placement": "floor",
+      "blocks": true,
+      "comfort": 1,
+      "atmosphere": 1,
+      "visual": {
+        "type": "table",
+        "color": "#5e4232",
+        "height": 14,
+        "top_extra": 10,
+        "props": []
+      },
+      "surface_height": 14.0
+    },
+    {
+      "id": "rug_big",
+      "icon": "🟦",
+      "name": "Большой ковёр",
+      "price": 260,
+      "grid_size": [
+        4,
+        3
+      ],
+      "rotation_allowed": true,
+      "category": "rug",
+      "placement": "floor",
+      "flat": true,
+      "blocks": false,
+      "comfort": 2,
+      "atmosphere": 3,
+      "visual": {
+        "type": "rug",
+        "color": "#2f7f86"
       }
     }
   ]

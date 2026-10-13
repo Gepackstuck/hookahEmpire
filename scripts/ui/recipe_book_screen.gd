@@ -104,9 +104,14 @@ func _build() -> void:
 	_list.item_selected.connect(_on_item_selected)
 	body.add_child(_list)
 
+	# Справа — карточка с деталями рецепта (в новом виде — скруглённая плашка).
+	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", UiStyle.card_style())
+	body.add_child(card)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_child(right)
+	card.add_child(right)
 	_empty = UiStyle.label("Рецептов пока нет. Смешайте что-нибудь и сохраните!", 24, UiStyle.MUTED)
 	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right.add_child(_empty)
@@ -119,6 +124,8 @@ func _build() -> void:
 	_detail.add_child(_title)
 	_badge = UiStyle.label("⭐ Секретный рецепт", 22, UiStyle.GOLD)
 	_detail.add_child(_badge)
+	if VisualStyle.modern:
+		_detail.add_child(HSeparator.new())
 	_composition = UiStyle.label("", 24)
 	_composition.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail.add_child(_composition)

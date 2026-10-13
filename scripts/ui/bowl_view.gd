@@ -29,6 +29,14 @@ var _stove_style: StyleBoxFlat = null
 var _tick: float = 0.0
 var _time: float = 0.0
 var _crumbs: Array[Vector3] = [] # x, y (нормализованно), размер
+## Время укола иглой (секунды до конца анимации) и общий «пилюльный» стиль для округлых плашек.
+var _poke := 0.0
+var _pill: StyleBoxFlat = StyleBoxFlat.new()
+const POKE_TIME := 0.18
+## Сколько «секунд удержания» даёт один полный круг мышью по краю чаши на шаге фольги.
+const FOIL_LAP_SECONDS := 1.0
+var _smoothing := false
+var _last_angle := 0.0
 
 
 func _ready() -> void:
@@ -227,6 +235,9 @@ func _gui_input(event: InputEvent) -> void:
 			_on_press(event.position)
 		else:
 			_holding = false
+			_smoothing = false
+	elif event is InputEventMouseMotion and _smoothing and step == "foil":
+		_smooth_to(event.position)
 
 
 func _on_press(point: Vector2) -> void:
@@ -250,17 +261,44 @@ func _on_press(point: Vector2) -> void:
 		"pack":
 			_holding = true
 		"foil":
-			_holding = true
+			# Фольгу разглаживают, ведя пальцем по кругу вдоль края чаши.
+			if _on_rim(point):
+				_smoothing = true
+				_last_angle = (point - center_point()).angle()
 		"holes":
 			var norm := _to_normalized(point)
 			if norm.length() <= 0.98 and state.add_hole(norm):
+				_poke = POKE_TIME
 				acted.emit("hole")
+
+
+func _on_rim(point: Vector2) -> bool:
+	var distance := (point - center_point()).length()
+	return distance >= RADIUS * 0.45 and distance <= RADIUS * 1.3
+
+
+## Палец ведут по краю: каждый пройденный угол добавляет натяжения (в любую сторону); вне края или рывком — не считается.
+func _smooth_to(point: Vector2) -> void:
+	if state == null or not _on_rim(point):
+		_last_angle = (point - center_point()).angle()
+		return
+	var angle := (point - center_point()).angle()
+	var swept := absf(angle_difference(_last_angle, angle))
+	_last_angle = angle
+	if swept > 0.7 or swept <= 0.0:
+		return
+	state.tighten(swept / TAU * FOIL_LAP_SECONDS)
+	_tick -= swept
+	if _tick <= 0.0:
+		_tick = 0.35
+		acted.emit("foil")
 
 
 func _process(delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	_time += delta
+	_poke = maxf(0.0, _poke - delta)
 	if _notice_time > 0.0:
 		_notice_time -= delta
 	if state != null and step == "light":
@@ -268,12 +306,10 @@ func _process(delta: float) -> void:
 	if state != null and _holding:
 		if step == "pack":
 			state.pack(delta)
-		elif step == "foil":
-			state.tighten(delta)
 		_tick -= delta
 		if _tick <= 0.0:
 			_tick = 0.18
-			acted.emit("pack" if step == "pack" else "foil")
+			acted.emit("pack")
 	queue_redraw()
 
 
@@ -288,10 +324,13 @@ func _draw() -> void:
 		_draw_coal_list(c, state.stove_coals)
 		_draw_gauge(c)
 		return
-	draw_circle(c + Vector2(0, 8), RADIUS + 22.0, Color(0, 0, 0, 0.35))
-	draw_circle(c, RADIUS + 16.0, Color("#8a4a2a"))
-	draw_circle(c, RADIUS + 6.0, Color("#b5653a"))
-	draw_circle(c, RADIUS, Color("#3a2316"))
+	if VisualStyle.modern:
+		_draw_bowl_base_modern(c)
+	else:
+		draw_circle(c + Vector2(0, 8), RADIUS + 22.0, Color(0, 0, 0, 0.35))
+		draw_circle(c, RADIUS + 16.0, Color("#8a4a2a"))
+		draw_circle(c, RADIUS + 6.0, Color("#b5653a"))
+		draw_circle(c, RADIUS, Color("#3a2316"))
 	var step_index := ManualPreparation.STEPS.find(step)
 	_draw_contents(c, step_index)
 	if step_index >= ManualPreparation.STEPS.find("foil") and step != "mix":
@@ -299,6 +338,22 @@ func _draw() -> void:
 	_draw_holes(c)
 	_draw_coal_list(c, state.coals)
 	_draw_gauge(c)
+	if step == "foil":
+		_draw_foil_guide(c)
+	if VisualStyle.modern and step == "holes":
+		_draw_needle(c)
+
+
+## Керамическая чаша в новом виде: мягкая тень, глазурь с бликом, глубокая тёмная середина.
+func _draw_bowl_base_modern(c: Vector2) -> void:
+	draw_texture_rect(VisualStyle.soft_disc(), Rect2(c + Vector2(-RADIUS - 56.0, -RADIUS - 40.0), Vector2((RADIUS + 56.0) * 2.0, (RADIUS + 56.0) * 2.0)), false, Color(0, 0, 0, 0.55))
+	draw_circle(c, RADIUS + 17.0, Color("#6e3a22"))
+	draw_circle(c, RADIUS + 12.0, Color("#a2573a"))
+	draw_circle(c, RADIUS + 6.0, Color("#c9794c"))
+	draw_arc(c, RADIUS + 11.0, PI * 1.02, PI * 1.62, 40, Color(1.0, 0.88, 0.72, 0.6), 3.0, true)
+	draw_arc(c, RADIUS + 11.0, PI * 0.05, PI * 0.5, 24, Color(0.2, 0.08, 0.04, 0.45), 3.0, true)
+	draw_circle(c, RADIUS, Color("#1f110a"))
+	draw_circle(c, RADIUS - 5.0, Color("#33201a"))
 
 
 func _portion_color(ingredient_id: String) -> Color:
@@ -343,6 +398,9 @@ func _draw_contents(c: Vector2, step_index: int) -> void:
 
 
 func _draw_foil(c: Vector2) -> void:
+	if VisualStyle.modern:
+		_draw_foil_modern(c)
+		return
 	var tension := state.tension
 	var foil_color := Color(0.8, 0.82, 0.86, 0.3 + 0.6 * tension)
 	draw_circle(c, RADIUS * 1.02, foil_color)
@@ -356,7 +414,86 @@ func _draw_foil(c: Vector2) -> void:
 	draw_arc(c, RADIUS * 1.02, 0.0, TAU, 64, Color(1, 1, 1, 0.6), 2.0)
 
 
+## Фольга в новом виде: холодный металл с отблеском, мягкие складки (светлая и тёмная линия), кромка с тенью.
+func _draw_foil_modern(c: Vector2) -> void:
+	var tension := state.tension
+	draw_circle(c, RADIUS * 1.02, Color(0.74, 0.77, 0.84, 0.3 + 0.62 * tension))
+	var sheen := 0.1 + 0.3 * tension
+	draw_texture_rect(VisualStyle.soft_disc(), Rect2(c + Vector2(-RADIUS * 0.95, -RADIUS * 1.05), Vector2(RADIUS * 1.5, RADIUS * 1.3)), false, Color(1, 1, 1, sheen))
+	for i in 14:
+		var angle := TAU * float(i) / 14.0 + 0.2
+		var inner := RADIUS * 0.15
+		var outer := RADIUS * (0.5 + 0.45 * (1.0 - tension) * (0.6 + 0.4 * sin(float(i) * 2.3)))
+		var from := c + Vector2(cos(angle), sin(angle)) * inner
+		var to := c + Vector2(cos(angle + 0.12), sin(angle + 0.12)) * outer
+		draw_line(from + Vector2(1.5, 1.5), to + Vector2(1.5, 1.5), Color(0.25, 0.27, 0.35, 0.3 * (1.0 - tension)), 2.0, true)
+		draw_line(from, to, Color(1, 1, 1, 0.55 * (1.0 - tension)), 1.6, true)
+	draw_arc(c, RADIUS * 1.02, PI * 1.05, PI * 1.65, 40, Color(1, 1, 1, 0.75), 2.5, true)
+	draw_arc(c, RADIUS * 1.02, PI * 0.05, PI * 0.6, 28, Color(0.2, 0.22, 0.3, 0.45), 3.0, true)
+
+
+## Подсказка шага фольги: бегущие стрелки по краю чаши и «палец» у курсора, пока фольгу разглаживают.
+func _draw_foil_guide(c: Vector2) -> void:
+	if not _smoothing:
+		var count := 14
+		for i in count:
+			var angle := TAU * float(i) / float(count) + _time * 0.8
+			var at := c + Vector2.from_angle(angle) * RADIUS * 0.86
+			var tangent := Vector2.from_angle(angle + PI * 0.5)
+			var normal := Vector2.from_angle(angle)
+			var alpha := 0.35 + 0.35 * sin(_time * 3.0 - float(i) * 0.6)
+			var color := Color(1.0, 0.9, 0.6, alpha)
+			draw_line(at - tangent * 7.0 + normal * 5.0, at + tangent * 4.0, color, 2.4, true)
+			draw_line(at - tangent * 7.0 - normal * 5.0, at + tangent * 4.0, color, 2.4, true)
+	else:
+		var mouse := get_local_mouse_position()
+		draw_texture_rect(VisualStyle.soft_disc(), Rect2(mouse - Vector2(34, 34), Vector2(68, 68)), false, Color(1.0, 0.95, 0.8, 0.55))
+		draw_circle(mouse, 9.0, Color(1, 1, 1, 0.55))
+		draw_arc(c, RADIUS * 1.02, _last_angle - 0.9, _last_angle, 16, Color(1, 1, 1, 0.8), 3.0, true)
+
+
+## Игла для прокалывания фольги: следует за мышью, перед кликом «нависает», при уколе опускается кончиком в точку.
+func _draw_needle(c: Vector2) -> void:
+	var mouse := get_local_mouse_position()
+	if (mouse - c).length() > RADIUS * 1.12:
+		return
+	var progress := 0.0
+	if _poke > 0.0:
+		progress = sin(PI * (1.0 - _poke / POKE_TIME))
+		# Колечко от укола расходится по фольге.
+		var ring := 1.0 - _poke / POKE_TIME
+		draw_arc(mouse, 5.0 + 16.0 * ring, 0.0, TAU, 24, Color(1, 1, 1, 0.6 * (1.0 - ring)), 1.6, true)
+	var dir := Vector2(0.5, -0.866)
+	var normal := Vector2(-dir.y, dir.x)
+	var tip := mouse + dir * (16.0 * (1.0 - progress))
+	# Тень иглы на фольге.
+	draw_line(mouse + Vector2(3, 4), mouse + Vector2(3, 4) + dir * 70.0, Color(0, 0, 0, 0.22), 2.0, true)
+	var body_end := tip + dir * 104.0
+	var steel := Color("#cfd5e0")
+	draw_colored_polygon(PackedVector2Array([tip, tip + dir * 46.0 + normal * 1.5, body_end + normal * 2.4, body_end - normal * 2.4, tip + dir * 46.0 - normal * 1.5]), steel)
+	draw_line(tip + dir * 3.0 + normal * 0.6, body_end + normal * 1.2, Color(1, 1, 1, 0.8), 1.0, true)
+	draw_line(tip + dir * 3.0 - normal * 0.8, body_end - normal * 1.6, Color(0.25, 0.28, 0.36, 0.7), 1.0, true)
+	# Ручка: цветная обмотка и золотая головка.
+	var grip_end := body_end + dir * 44.0
+	draw_colored_polygon(PackedVector2Array([body_end + normal * 3.2, grip_end + normal * 5.2, grip_end - normal * 5.2, body_end - normal * 3.2]), Color("#c23b4a"))
+	draw_line(body_end + normal * 2.4 + dir * 4.0, grip_end + normal * 4.2, Color(1, 1, 1, 0.4), 1.2, true)
+	for k in 4:
+		var at := body_end + dir * (8.0 + 9.0 * float(k))
+		draw_line(at + normal * 4.6, at - normal * 4.6, Color(0.35, 0.05, 0.1, 0.5), 1.2, true)
+	draw_circle(grip_end + dir * 3.0, 6.0, Color("#d9ac4a"))
+	draw_circle(grip_end + dir * 3.0 + Vector2(-1.8, -1.8), 2.0, Color("#fff0b8"))
+	if progress > 0.5:
+		draw_circle(mouse, 2.2, Color(1, 1, 1, 0.9))
+
+
 func _draw_holes(c: Vector2) -> void:
+	if VisualStyle.modern:
+		for hole in state.holes:
+			var at := c + hole * RADIUS
+			draw_circle(at, 7.5, Color(0.85, 0.88, 0.94, 0.85))
+			draw_circle(at, 5.6, Color("#120d0b"))
+			draw_circle(at + Vector2(1.2, 1.2), 3.0, Color(0, 0, 0, 0.6))
+		return
 	for hole in state.holes:
 		draw_circle(c + hole * RADIUS, 6.0, Color("#1a1512"))
 		draw_arc(c + hole * RADIUS, 6.0, 0.0, TAU, 12, Color(1, 1, 1, 0.5), 1.5)
@@ -371,8 +508,15 @@ func _draw_coal_list(c: Vector2, list: Array[Vector2]) -> void:
 			body = Color("#0e0e0f")
 		elif heat > 0.0:
 			body = Color("#2b2b2e").lerp(Color("#d9541a"), heat * 0.8)
-		if heat > 0.0 and not state.is_burnt():
-			draw_circle(at, COAL_SIZE * 0.85 + 8.0 * sin(_time * 8.0), Color(1.0, 0.5, 0.15, 0.22 * heat))
+		if VisualStyle.modern:
+			var glow := COAL_SIZE * 1.5 + 8.0 * sin(_time * 8.0)
+			if heat > 0.0 and not state.is_burnt():
+				draw_texture_rect(VisualStyle.soft_disc(), Rect2(at - Vector2(glow, glow), Vector2(glow, glow) * 2.0), false, Color(1.0, 0.5, 0.15, 0.5 * heat))
+			var box := Vector2(COAL_SIZE, COAL_SIZE)
+			_pill_rect(Rect2(at - box * 0.5 + Vector2(3, 5), box), Color(0, 0, 0, 0.35), 18)
+			_pill_rect(Rect2(at - box * 0.5, box), body, 18, Color(1, 0.6, 0.3, 0.5 * heat + 0.2), 2)
+			_pill_rect(Rect2(at - box * 0.5 + Vector2(10, 10), box - Vector2(20, 20)), body.lightened(0.12), 12)
+			continue
 		var half := Vector2(COAL_SIZE, COAL_SIZE) * 0.5
 		draw_rect(Rect2(at - half, half * 2.0), body)
 		draw_rect(Rect2(at - half + Vector2(6, 6), half * 2.0 - Vector2(12, 12)), body.lightened(0.12))
@@ -386,6 +530,9 @@ func _switch_rect() -> Rect2:
 
 ## Электроплитка для углей (вид сверху): корпус, спираль, кнопка, лампа и ручка.
 func _draw_stove(c: Vector2) -> void:
+	if VisualStyle.modern:
+		_draw_stove_modern(c)
+		return
 	var coil_heat := state.coil_temp
 	if _stove_style == null:
 		_stove_style = StyleBoxFlat.new()
@@ -433,6 +580,48 @@ func _draw_stove(c: Vector2) -> void:
 		draw_circle(lamp, 10.0, Color("#3a1512"))
 
 
+## Плитка в новом виде: тёмный металлический корпус со скруглением, ободок конфорки с бликом, раскаляющаяся спираль со свечением,
+## переключатель-«таблетка» и светодиод.
+func _draw_stove_modern(c: Vector2) -> void:
+	var coil_heat := state.coil_temp
+	var body_half := RADIUS + 22.0
+	var body := Rect2(c + Vector2(-body_half, -body_half + 6.0), Vector2(body_half * 2.0, body_half * 2.0 + 28.0))
+	_pill_rect(Rect2(body.position + Vector2(0, 8), body.size), Color(0, 0, 0, 0.4), 32)
+	_pill_rect(body, Color("#2b2733"), 32, Color(0.95, 0.78, 0.5, 0.35), 2)
+	_pill_rect(Rect2(body.position + Vector2(8, 8), body.size - Vector2(16, 16)), Color("#241f2b"), 26)
+	# Конфорка.
+	draw_circle(c, RADIUS + 3.0, Color("#15121a"))
+	draw_circle(c, RADIUS, Color("#8b8f9c"))
+	draw_arc(c, RADIUS - 2.0, PI * 1.05, PI * 1.6, 36, Color(1, 1, 1, 0.6), 3.0, true)
+	draw_circle(c, RADIUS - 9.0, Color("#101014"))
+	var coil := Color("#59545f").lerp(Color("#ff6a2a"), coil_heat)
+	if coil_heat > 0.0:
+		draw_texture_rect(VisualStyle.soft_disc(), Rect2(c - Vector2(RADIUS, RADIUS) * 1.15, Vector2(RADIUS, RADIUS) * 2.3), false, Color(1.0, 0.4, 0.12, 0.45 * coil_heat))
+	for k in 4:
+		draw_arc(c, RADIUS * (0.2 + 0.2 * float(k)), 0.0, TAU, 56, coil, 8.0, true)
+		draw_arc(c, RADIUS * (0.2 + 0.2 * float(k)), PI * 1.1, PI * 1.5, 16, coil.lightened(0.35), 2.5, true)
+	for k in 6:
+		var angle := TAU * float(k) / 6.0 + 0.3
+		draw_line(c + Vector2.from_angle(angle) * RADIUS * 0.2, c + Vector2.from_angle(angle) * RADIUS * 0.8, coil.darkened(0.2), 5.0, true)
+	# Панель: переключатель-таблетка и светодиод.
+	var switch_rect := _switch_rect()
+	var usable := state.stove_on or not state.stove_coals.is_empty()
+	_pill_rect(switch_rect, Color("#0f0d13"), 14, Color(0.95, 0.78, 0.5, 0.3), 1)
+	var knob := Rect2(switch_rect.position + Vector2(3, 3) + Vector2(switch_rect.size.x * 0.5 - 2.0 if state.stove_on else 0.0, 0.0), Vector2(switch_rect.size.x * 0.5 - 4.0, switch_rect.size.y - 6.0))
+	_pill_rect(knob, Color("#e8493b") if state.stove_on else (Color("#5b5766") if usable else Color("#2f2c36")), 11)
+	var font := get_theme_default_font()
+	if font != null:
+		draw_string(font, switch_rect.position + Vector2(8, 20), "ВЫКЛ", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.85, 0.9) if usable else Color(0.4, 0.4, 0.45))
+		draw_string(font, switch_rect.position + Vector2(switch_rect.size.x - 32.0, 20), "ВКЛ", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE if state.stove_on else Color(0.5, 0.5, 0.55))
+	var lamp := Vector2(c.x + body_half - 40.0, c.y + RADIUS + 33.0)
+	if state.stove_on:
+		draw_texture_rect(VisualStyle.soft_disc(), Rect2(lamp - Vector2(30, 30), Vector2(60, 60)), false, Color(1.0, 0.25, 0.15, 0.7))
+		draw_circle(lamp, 9.0, Color("#ff4a3a"))
+		draw_circle(lamp + Vector2(-3, -3), 3.0, Color(1, 0.85, 0.8))
+	else:
+		draw_circle(lamp, 9.0, Color("#3a1815"))
+
+
 ## Шкала внизу: текущее значение шага и (с подсказкой) зона цели.
 func _draw_gauge(c: Vector2) -> void:
 	var info := gauge_info()
@@ -441,6 +630,9 @@ func _draw_gauge(c: Vector2) -> void:
 	var width := 380.0
 	var gauge_gap := 76.0 if step == "light" else 34.0
 	var rect := Rect2(Vector2(c.x - width * 0.5, c.y + RADIUS + gauge_gap), Vector2(width, 22.0))
+	if VisualStyle.modern:
+		_draw_gauge_modern(rect, info)
+		return
 	draw_rect(rect, Color(0.12, 0.1, 0.09))
 	if hints_on:
 		var zone_left := clampf(float(info["zone_center"]) - float(info["zone_half"]), 0.0, 1.0)
@@ -452,6 +644,33 @@ func _draw_gauge(c: Vector2) -> void:
 	var font := get_theme_default_font()
 	if font != null:
 		draw_string(font, rect.position + Vector2(0, rect.size.y + 26.0), str(info["caption"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.85, 0.8, 0.7))
+		var status := str(info.get("status", ""))
+		if not status.is_empty():
+			draw_string(font, rect.position + Vector2(0, rect.size.y + 54.0), status, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.85, 0.5))
+
+
+## Закруглённая плашка (общий стиль для шкалы и углей в новом виде).
+func _pill_rect(rect: Rect2, color: Color, radius: int, border: Color = Color(0, 0, 0, 0), border_width: int = 0) -> void:
+	_pill.bg_color = color
+	_pill.set_corner_radius_all(radius)
+	_pill.border_color = border
+	_pill.set_border_width_all(border_width)
+	draw_style_box(_pill, rect)
+
+
+func _draw_gauge_modern(rect: Rect2, info: Dictionary) -> void:
+	var width := rect.size.x
+	_pill_rect(rect, Color(0.06, 0.035, 0.09, 0.95), 11, Color(0.95, 0.78, 0.5, 0.35), 1)
+	if hints_on:
+		var zone_left := clampf(float(info["zone_center"]) - float(info["zone_half"]), 0.0, 1.0)
+		var zone_right := clampf(float(info["zone_center"]) + float(info["zone_half"]), 0.0, 1.0)
+		_pill_rect(Rect2(rect.position + Vector2(zone_left * width, 2.0), Vector2(maxf((zone_right - zone_left) * width, 6.0), rect.size.y - 4.0)), Color(0.4, 0.88, 0.55, 0.9), 8)
+	var value := clampf(float(info["value"]), 0.0, 1.0)
+	if value > 0.01:
+		_pill_rect(Rect2(rect.position + Vector2(2, 2), Vector2(maxf(value * (width - 4.0), 10.0), rect.size.y - 4.0)), Color(1.0, 0.82, 0.45, 0.8), 9)
+	var font := get_theme_default_font()
+	if font != null:
+		draw_string(font, rect.position + Vector2(0, rect.size.y + 26.0), str(info["caption"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.92, 0.86, 0.76))
 		var status := str(info.get("status", ""))
 		if not status.is_empty():
 			draw_string(font, rect.position + Vector2(0, rect.size.y + 54.0), status, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.85, 0.5))

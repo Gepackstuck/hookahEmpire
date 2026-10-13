@@ -4,7 +4,6 @@ extends Control
 
 signal resume_requested
 signal profiles_requested
-signal settings_requested
 signal stats_requested
 signal main_menu_requested
 signal quit_requested
@@ -16,9 +15,37 @@ const LOGO_PATHS: Array[String] = [
 ]
 
 
+var _panel: PanelContainer
+var _box: VBoxContainer
+var _settings: SettingsPanel = null
+
+
+## Настройки открываются внутри этого же меню (вместо основных кнопок); page готовит Main.
+func embed_settings(page: SettingsPanel) -> void:
+	_settings = page
+	_settings.visible = false
+	_panel.add_child(_settings)
+	_settings.closed.connect(_close_settings)
+
+
+func _open_settings() -> void:
+	if _settings == null:
+		return
+	_box.visible = false
+	_settings.visible = true
+
+
+func _close_settings() -> void:
+	if _settings != null:
+		_settings.visible = false
+	_box.visible = true
+
+
 func setup() -> void:
 	var panel := UiStyle.build_frame(self, Vector2(620, 0))
+	_panel = panel
 	var box := VBoxContainer.new()
+	_box = box
 	box.add_theme_constant_override("separation", 10)
 	panel.add_child(box)
 	# Сверху — случайный логотип, под ним пункты списком.
@@ -39,7 +66,7 @@ func setup() -> void:
 	box.add_child(pause)
 	box.add_child(_button("▶  Продолжить", resume_requested))
 	box.add_child(_button("🪔  Профили", profiles_requested))
-	box.add_child(_button("⚙️  Настройки", settings_requested))
+	box.add_child(_action_button("⚙️  Настройки", _open_settings))
 	box.add_child(_button("📊  Статистика", stats_requested))
 	box.add_child(_button("🏠  В главное меню", main_menu_requested))
 	box.add_child(_button("Выйти из игры", quit_requested))
@@ -48,7 +75,10 @@ func setup() -> void:
 func _input(event: InputEvent) -> void:
 	if visible and event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
-		resume_requested.emit()
+		if _settings != null and _settings.visible:
+			_close_settings()
+		else:
+			resume_requested.emit()
 
 
 func _button(text: String, target: Signal) -> Button:
@@ -59,4 +89,12 @@ func _button(text: String, target: Signal) -> Button:
 	button.custom_minimum_size = Vector2(330, 48)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(func() -> void: target.emit())
+	return button
+
+
+func _action_button(text: String, action: Callable) -> Button:
+	var button := _button(text, resume_requested)
+	for connection in button.pressed.get_connections():
+		button.pressed.disconnect(connection["callable"])
+	button.pressed.connect(action)
 	return button

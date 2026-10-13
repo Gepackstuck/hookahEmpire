@@ -1,51 +1,24 @@
 class_name SettingsMenu
 extends Control
-## M11: окно настроек: громкость (настройка общая для всех профилей и запоминается).
+## Отдельное окно настроек (запасной вариант): та же панель SettingsPanel в рамке.
 
 signal volume_changed(percent: float)
 signal volume_committed(percent: float)
+signal style_changed(modern: bool)
+signal names_changed(show: bool)
 signal closed
 
 
-func setup(volume_percent: float) -> void:
+func setup(volume_percent: float, modern_graphics: bool = false, show_names: bool = true) -> void:
 	var panel := UiStyle.build_frame(self, Vector2(560, 0))
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 18)
-	panel.add_child(box)
-	var title := UiStyle.label("⚙️ Настройки", 34, UiStyle.GOLD)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	box.add_child(row)
-	row.add_child(UiStyle.label("🔊 Громкость", 24))
-	var slider := HSlider.new()
-	slider.min_value = 0.0
-	slider.max_value = 100.0
-	slider.step = 1.0
-	slider.value = clampf(volume_percent, 0.0, 100.0)
-	slider.custom_minimum_size = Vector2(240, 0)
-	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	slider.focus_mode = Control.FOCUS_NONE
-	row.add_child(slider)
-	var value_label := UiStyle.label("%d%%" % int(slider.value), 22, UiStyle.MUTED)
-	value_label.custom_minimum_size = Vector2(64, 0)
-	row.add_child(value_label)
-	slider.value_changed.connect(func(value: float) -> void:
-		value_label.text = "%d%%" % int(value)
-		volume_changed.emit(value))
-	slider.drag_ended.connect(func(_changed: bool) -> void: volume_committed.emit(slider.value))
-	var close := Button.new()
-	close.text = "Назад"
-	close.focus_mode = Control.FOCUS_NONE
-	close.add_theme_font_size_override("font_size", 22)
-	close.custom_minimum_size = Vector2(200, 48)
-	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	close.pressed.connect(func() -> void:
-		volume_committed.emit(slider.value)
-		closed.emit())
-	box.add_child(close)
+	var page := SettingsPanel.new()
+	panel.add_child(page)
+	page.setup(volume_percent, modern_graphics, show_names)
+	page.volume_changed.connect(func(v: float) -> void: volume_changed.emit(v))
+	page.volume_committed.connect(func(v: float) -> void: volume_committed.emit(v))
+	page.style_changed.connect(func(m: bool) -> void: style_changed.emit(m))
+	page.names_changed.connect(func(n: bool) -> void: names_changed.emit(n))
+	page.closed.connect(func() -> void: closed.emit())
 
 
 func _input(event: InputEvent) -> void:

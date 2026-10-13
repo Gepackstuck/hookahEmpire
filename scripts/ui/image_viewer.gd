@@ -16,7 +16,7 @@ func _ready() -> void:
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_dim = ColorRect.new()
-	_dim.color = Color(0, 0, 0, 0.82)
+	_dim.color = Color(0.04, 0.02, 0.07, 0.86)
 	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dim)
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -35,6 +35,7 @@ func _ready() -> void:
 	_picture.offset_bottom = 0.0
 	_title = Label.new()
 	_title.add_theme_font_size_override("font_size", 26)
+	_title.add_theme_color_override("font_color", Color(0.95, 0.78, 0.5))
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_title)

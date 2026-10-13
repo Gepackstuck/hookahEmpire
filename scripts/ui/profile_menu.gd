@@ -95,6 +95,11 @@ func _build_row(info: Dictionary) -> Control:
 	style.content_margin_right = 16
 	style.content_margin_top = 10
 	style.content_margin_bottom = 10
+	if VisualStyle.modern:
+		style.bg_color = Color(0.12, 0.07, 0.17, 0.95)
+		style.set_corner_radius_all(16)
+		style.set_border_width_all(1)
+		style.border_color = Color(0.95, 0.78, 0.5, 0.95) if is_current else Color(0.95, 0.78, 0.5, 0.3)
 	card.add_theme_stylebox_override("panel", style)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)

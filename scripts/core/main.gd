@@ -118,6 +118,9 @@ var _intro: IntroGuide = null
 var _buddy: Buddy = null
 var _guide_panel: PanelContainer = null
 var _guide_header: Label = null
+## Кнопка со счётчиком шагов цели: сворачивает и разворачивает панель цели.
+var _guide_button: Button = null
+var _guide_expanded := false
 var _guide_label: Label = null
 var _game_seconds := 0.0
 var _strong_count := 0
@@ -171,6 +174,7 @@ func _ready() -> void:
 
 	_save = get_node_or_null("/root/SaveService") as SaveServiceScript
 	_apply_saved_volume()
+	_apply_saved_graphics()
 	# M11: пока профиль не выбран, показываем только список профилей.
 	if _save != null and _save.needs_profile_choice():
 		_show_profile_gate()
@@ -178,6 +182,7 @@ func _ready() -> void:
 
 	_add_debug_button()
 	_add_stats_panel()
+	_add_fps_counter()
 	_add_objective_label()
 	_garage.friend_arrived.connect(_on_friend_arrived)
 	_garage.friend_inhaled.connect(_on_friend_inhaled)
@@ -1238,7 +1243,7 @@ func _set_autopilot(on: bool) -> void:
 	if on and not _autopilot_allowed():
 		if _autopilot_button != null:
 			_autopilot_button.set_pressed_no_signal(false)
-		_notify("🔒 Автопилот откроется, когда ты обслужишь друга в быстром режиме 🎚.")
+		_notify("🔒 Автопилот откроется, когда ты обслужишь друга в режиме «Быстрая готовка» ⚡.")
 		return
 	_autopilot = on
 	if _autopilot_button != null:
@@ -1273,6 +1278,13 @@ func _set_autopilot(on: bool) -> void:
 				_runner.advance()
 			else:
 				_runner.choose(0)
+
+
+## Тест-прогон выключает следование камеры за кальянщиком (видна вся комната), выключение прогона включает его обратно.
+func _set_test_camera(follow: bool) -> void:
+	if _camera_button != null:
+		_camera_button.set_pressed_no_signal(follow)
+	_on_camera_button_toggled(follow)
 
 
 func _on_camera_button_toggled(pressed: bool) -> void:
@@ -2069,7 +2081,7 @@ func _autopilot_idle() -> void:
 		return
 	var options: Array = []
 	for id in IDLE_TARGETS:
-		if id != _idle_last and _garage.has_object(id):
+		if id != _idle_last and _garage.has_object(id) and _garage.is_object_visible(id):
 			options.append(id)
 	if options.is_empty():
 		return
@@ -2366,6 +2378,7 @@ func _clear_wants_badge() -> void:
 
 ## Автопилот «нажимает» за игрока: листает диалоги и закрывает карточку итогов.
 func _process(delta: float) -> void:
+	_tick_fps(delta)
 	_game_seconds += delta
 	if _modal_dim != null:
 		_modal_dim.visible = _mixer.visible or _book.visible or _preparation_screen.visible or (_manual_screen != null and _manual_screen.visible)
@@ -2462,6 +2475,41 @@ func _apply_saved_volume() -> void:
 	_set_volume_percent(percent)
 
 
+## Вид графики: «как раньше» или новый; запоминается в настройках и применяется на лету.
+func _apply_saved_graphics() -> void:
+	var modern := false
+	if _save != null:
+		modern = bool(_save.load_setting(VisualStyle.SETTING_KEY, false))
+	VisualStyle.set_modern(modern)
+	if _save != null:
+		VisualStyle.set_show_names(bool(_save.load_setting(VisualStyle.NAMES_KEY, true)))
+	if _garage != null:
+		_garage.refresh_visual_style()
+	_apply_ui_theme()
+
+
+func _on_friend_names_changed(show: bool) -> void:
+	VisualStyle.set_show_names(show)
+	if _save != null:
+		_save.save_setting(VisualStyle.NAMES_KEY, show)
+
+
+func _on_graphics_style_changed(modern: bool) -> void:
+	VisualStyle.set_modern(modern)
+	if _save != null:
+		_save.save_setting(VisualStyle.SETTING_KEY, modern)
+	if _garage != null:
+		_garage.refresh_visual_style()
+	_apply_ui_theme()
+
+
+## Новый вид интерфейса: кнопки главного экрана и всех окон (окна берут тему при открытии).
+func _apply_ui_theme() -> void:
+	var root := get_node_or_null("UI/Root") as Control
+	if root != null:
+		root.theme = UiStyle.make_controls_theme() if VisualStyle.modern else null
+
+
 func _set_volume_percent(percent: float) -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(clampf(percent, 0.0, 100.0) / 100.0))
 	AudioServer.set_bus_mute(0, percent <= 0.0)
@@ -2520,6 +2568,12 @@ func _add_debug_button() -> void:
 	_test_run_check.offset_right = -260.0
 	_test_run_check.offset_top = 16.0
 	_test_run_check.offset_bottom = 68.0
+	# Галочки нет: включённость видна по подсветке плашки.
+	var blank := ImageTexture.create_from_image(Image.create_empty(1, 1, false, Image.FORMAT_RGBA8))
+	for icon in ["checked", "unchecked", "checked_disabled", "unchecked_disabled"]:
+		_test_run_check.add_theme_icon_override(icon, blank)
+	_test_run_check.add_theme_constant_override("h_separation", 0)
+	_test_run_check.toggled.connect(func(on: bool) -> void: _test_run_check.modulate = Color(0.55, 1.0, 0.6) if on else Color.WHITE)
 	_test_run_check.toggled.connect(_on_test_run_toggled)
 	$UI/Root.add_child(_test_run_check)
 
@@ -2527,13 +2581,17 @@ func _add_debug_button() -> void:
 func _on_test_run_toggled(on: bool) -> void:
 	_test_run = on
 	if not on:
-		_notify("🧪 Тест-прогон выключен (автопилот остаётся как был).")
+		_notify("🧪 Тест-прогон выключен (автопилот остаётся как был), скорость ×1.")
+		_set_game_speed(1.0)
+		_set_test_camera(true)
 		return
 	_test_angry_seen = _state != null and _state.get_flag(SECOND_GUEST_DEMO_FLAG, false) == true
 	if _economy != null:
 		_economy.earn(1000)
 	_notify("🧪 Тест-прогон: автопилот, сильные рецепты, мебель парой. +1000 💰 на покупки.")
 	_set_autopilot(true)
+	_set_game_speed(10.0)
+	_set_test_camera(false)
 
 
 ## Второй гость ушёл рассерженным (вызывается планировщиком гостей): тест-прогон может ставить стол и стул.
@@ -2830,6 +2888,12 @@ func _toggle_furniture_screen() -> void:
 	_furniture_screen.open()
 	if _guide_panel != null:
 		_guide_panel.visible = false
+	if _guide_button != null:
+		_guide_button.visible = false
+	# Кнопки слева сверху не должны лезть на окно мебели.
+	for node in [_profile_button, _milk_button]:
+		if node != null:
+			(node as Control).visible = false
 	_garage.begin_free_camera()
 	if _furniture_button != null:
 		_furniture_button.visible = false
@@ -2851,7 +2915,12 @@ func _on_furniture_closed() -> void:
 	if _furniture_button != null:
 		_furniture_button.visible = _furniture_unlocked()
 	if _guide_panel != null:
-		_guide_panel.visible = true
+		_guide_panel.visible = _guide_expanded
+	if _guide_button != null:
+		_guide_button.visible = true
+	for node in [_profile_button, _milk_button]:
+		if node != null:
+			(node as Control).visible = true
 	_set_furniture_pause(false)
 	_update_input_lock()
 
@@ -3037,7 +3106,7 @@ func _setup_modal_dim() -> void:
 	root.add_child(_modal_dim)
 	_modal_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.move_child(_modal_dim, _mixer.get_index())
-	for node in [_hud, _guide_panel, _objective_label, _furniture_button, _milk_button, _autopilot_button, _camera_button, _stats_button]:
+	for node in [_hud, _guide_panel, _guide_button, _objective_label, _furniture_button, _milk_button, _autopilot_button, _camera_button, _stats_button]:
 		if node != null and (node as Node).get_parent() == root:
 			root.move_child(node as Node, _modal_dim.get_index())
 
@@ -3099,7 +3168,7 @@ func _apply_unlocks() -> void:
 	if quick and _state.get_flag("quick_unlock_seen", false) != true and _intro.quick_after_sessions > 0:
 		_state.set_flag("quick_unlock_seen", true)
 		_mark_beat("quick_unlocked")
-		_notify("🎚 Открыт быстрый режим приготовления!")
+		_notify("⚡ Открыта быстрая готовка!")
 	var furniture := _intro.is_furniture_unlocked(count)
 	if _furniture_button != null and not _furniture_open():
 		_furniture_button.visible = furniture
@@ -3141,6 +3210,21 @@ func _build_guide_panel() -> void:
 	box.add_child(_guide_label)
 	$UI/Root.add_child(_guide_panel)
 	_guide_panel.visible = false
+	_guide_button = Button.new()
+	_guide_button.text = "🎯"
+	_guide_button.tooltip_text = "Цель: показать / скрыть"
+	_guide_button.focus_mode = Control.FOCUS_NONE
+	_guide_button.add_theme_font_size_override("font_size", 22)
+	_guide_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_guide_button.offset_left = -600.0
+	_guide_button.offset_right = -500.0
+	_guide_button.offset_top = 16.0
+	_guide_button.offset_bottom = 68.0
+	_guide_button.visible = false
+	_guide_button.pressed.connect(func() -> void:
+		_guide_expanded = not _guide_expanded
+		_guide_panel.visible = _guide_expanded and not _furniture_open())
+	$UI/Root.add_child(_guide_button)
 	# Окно статистики (F8) лежит поверх цели.
 	if _stats_panel != null and _stats_panel.get_parent() == $UI/Root:
 		$UI/Root.move_child(_guide_panel, _stats_panel.get_index())
@@ -3172,7 +3256,10 @@ func _refresh_guide() -> void:
 	else:
 		_guide_header.text = "🎯 Цель (%d/%d)" % [int(step["done_count"]) + 1, int(step["total"])]
 	_guide_label.text = str(step["text"])
-	_guide_panel.visible = not _furniture_open()
+	_guide_panel.visible = _guide_expanded and not _furniture_open()
+	if _guide_button != null:
+		_guide_button.visible = not _furniture_open()
+		_guide_button.text = "🎯 ✅" if str(step["id"]) == "done" else "🎯 %d/%d" % [int(step["done_count"]) + 1, int(step["total"])]
 
 
 # --- Бэн ---
@@ -3359,16 +3446,25 @@ func _autopilot_furnish() -> bool:
 			break
 	if uid == "" and not _furniture.stored_entries().is_empty():
 		uid = str(_furniture.stored_entries()[0]["uid"])
+	if uid == "":
+		uid = _autopilot_buy_nook()
 	if uid == "" and _furniture.placed_non_gift_count() < 2:
+		# Каждый прогон покупает разное: случайный небольшой предмет декора, которого ещё нет (картины, торшер, растение...).
+		var candidates: Array[String] = []
+		for item_id in _furniture.items:
+			var definition: Dictionary = _furniture.items[item_id]
+			var size: Array = definition.get("grid_size", [1, 1])
+			if str(item_id) == "small_table" or str(item_id) == "chair" or NOOK_ITEMS.has(str(item_id)) or int(size[0]) * int(size[1]) > 2:
+				continue
+			if _furniture.owned_count(str(item_id)) > 0 or int(definition["price"]) + 150 > _economy.balance():
+				continue
+			candidates.append(str(item_id))
 		var best := ""
 		var best_price := 1 << 30
-		for item_id in _furniture.items:
-			if str(item_id) == "small_table" or str(item_id) == "chair":
-				continue
-			var price := int(_furniture.items[item_id]["price"])
-			if price < best_price:
-				best_price = price
-				best = str(item_id)
+		if not candidates.is_empty():
+			_rng.randomize()
+			best = candidates[_rng.randi() % candidates.size()]
+			best_price = int(_furniture.items[best]["price"])
 		if best != "" and _economy.balance() >= best_price + 150:
 			var bought := _furniture.buy(best)
 			if bought["ok"]:
@@ -3455,11 +3551,81 @@ func _stored_uid_of(item_id: String) -> String:
 	return ""
 
 
+const NOOK_ITEMS: Array[String] = ["rug_big", "lamp", "plant"]
+
+
+## Прямоугольник поставленного дивана (пустой, если диван ещё не стоит).
+func _nook_couch_rect() -> Rect2:
+	var couch: Dictionary = _furniture.gift_entry("couch")
+	if couch.is_empty() or not bool(couch.get("placed", false)):
+		return Rect2()
+	return _furniture.entry_rect(couch)
+
+
+## Уголок отдыха у дивана: большой ковёр под ним, торшер и растение по краям. Покупает следующее недостающее; "" — нечего или не хватает денег.
+func _autopilot_buy_nook() -> String:
+	if not _nook_couch_rect().has_area():
+		return ""
+	for item_id in NOOK_ITEMS:
+		if _furniture.owned_count(item_id) > 0:
+			continue
+		var price := int(_furniture.item(item_id).get("price", 0))
+		if _economy.balance() < price + 150:
+			return ""
+		var bought := _furniture.buy(item_id)
+		if not bool(bought["ok"]):
+			return ""
+		_stats.bump("furniture_bought")
+		_stats.bump("furniture_spent", price)
+		_notify("🛒 Куплено: %s (−%d 💰)" % [str(_furniture.item(item_id)["name"]), price])
+		return str(bought["uid"])
+	return ""
+
+
+## Ставит предмет уголка у дивана. true — поставлен.
+func _autopilot_place_nook(uid: String, item_id: String, couch: Rect2) -> bool:
+	var layer := _garage.furniture_layer()
+	var along_x := couch.size.x >= couch.size.y
+	var spots: Array = []
+	if item_id == "rug_big":
+		# Ковёр обнимает диван целиком: перебираем полуклеточные сдвиги.
+		for rotation in [0, 1]:
+			var size := Vector2(4, 3) if rotation == 0 else Vector2(3, 4)
+			for dx in range(-8, 3):
+				for dy in range(-8, 3):
+					var at := couch.position + Vector2(float(dx) * 0.5, float(dy) * 0.5)
+					if Rect2(at, size).encloses(couch):
+						spots.append([at, rotation])
+	else:
+		# Торшер и растение — у торцов дивана, в одном ряду с ним.
+		var x0 := roundi(couch.position.x)
+		var y0 := roundi(couch.position.y)
+		var x1 := roundi(couch.end.x)
+		var y1 := roundi(couch.end.y)
+		if along_x:
+			spots = [[Vector2(x1, y0), 0], [Vector2(x0 - 1, y0), 0]]
+		else:
+			spots = [[Vector2(x0, y1), 0], [Vector2(x0, y0 - 1), 0]]
+	for spot: Array in spots:
+		var at: Vector2 = spot[0]
+		var rotation: int = spot[1]
+		if _furniture.check_placement(item_id, at, rotation, uid) != "":
+			continue
+		if layer != null and layer.validator.is_valid() and str(layer.validator.call(item_id, at, rotation, uid)) != "":
+			continue
+		if bool(_furniture.place(uid, at, rotation)["ok"]):
+			return true
+	return false
+
+
 func _autopilot_place(uid: String) -> bool:
 	var entry := _furniture.entry_of(uid)
 	if entry.is_empty():
 		return false
 	var item_id := str(entry["item"])
+	var couch_rect := _nook_couch_rect()
+	if NOOK_ITEMS.has(item_id) and couch_rect.has_area() and _autopilot_place_nook(uid, item_id, couch_rect):
+		return true
 	var layer := _garage.furniture_layer()
 	var cells: Array[Vector2i] = []
 	for x in range(_furniture.room_size.x):
@@ -4246,7 +4412,7 @@ func _show_main_menu() -> void:
 	menu.setup()
 	menu.play_requested.connect(func() -> void: _open_profile_menu(false))
 	menu.quit_requested.connect(func() -> void: get_tree().quit())
-	menu.settings_requested.connect(_open_settings)
+	menu.embed_settings(_make_settings_page())
 	$UI/Root.add_child(menu)
 
 
@@ -4351,6 +4517,31 @@ func _autosave() -> void:
 	_save.save_game()
 
 
+## Счётчик кадров в секунду: в правом нижнем углу, обновляется раз в полсекунды.
+var _fps_label: Label = null
+var _fps_timer := 0.0
+
+
+func _add_fps_counter() -> void:
+	_fps_label = UiStyle.label("FPS: --", 18, UiStyle.MUTED)
+	_fps_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_fps_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_fps_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_fps_label.offset_right = -14.0
+	_fps_label.offset_bottom = -10.0
+	_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$UI/Root.add_child(_fps_label)
+
+
+func _tick_fps(delta: float) -> void:
+	if _fps_label == null:
+		return
+	_fps_timer += delta
+	if _fps_timer >= 0.5:
+		_fps_timer = 0.0
+		_fps_label.text = "FPS: %d" % int(Engine.get_frames_per_second())
+
+
 func _tick_autosave(delta: float) -> void:
 	_autosave_timer += delta
 	if _autosave_timer >= AUTOSAVE_INTERVAL:
@@ -4358,7 +4549,48 @@ func _tick_autosave(delta: float) -> void:
 		_autosave()
 
 
+## Неоновая вывеска «Кальянная полка»: её вешает главный кальянщик, когда игрок называет кальянную.
+const NEON_SIGN_ID := "sign_neon"
+const NEON_SIGN_FLAG := "neon_sign_hung"
+var _neon_hanging := false
+
+
+## Показывает вывеску, если она уже висит (кальянная названа), иначе прячет.
+func _apply_neon_sign() -> void:
+	if _state == null or _garage == null or _neon_hanging or not _garage.has_object(NEON_SIGN_ID):
+		return
+	var hung: bool = _state.get_flag(NEON_SIGN_FLAG, false) == true or not _state.bar_name.is_empty()
+	if hung:
+		_state.set_flag(NEON_SIGN_FLAG, true)
+	if hung and not _garage.is_object_visible(NEON_SIGN_ID):
+		_garage.show_object(NEON_SIGN_ID)
+	elif not hung:
+		_garage.hide_object(NEON_SIGN_ID)
+
+
+## Кальянщик идёт к стене, вешает вывеску, и она загорается.
+func _hang_neon_sign() -> void:
+	if _state == null or _garage == null or _state.get_flag(NEON_SIGN_FLAG, false) == true or not _garage.has_object(NEON_SIGN_ID):
+		_neon_hanging = false
+		_apply_neon_sign()
+		return
+	_carrying = true
+	_update_input_lock()
+	await _garage.walk_to_object(NEON_SIGN_ID)
+	_garage.say("player", "Теперь всё по-настоящему: вешаю вывеску.")
+	await get_tree().create_timer(1.2).timeout
+	await _garage.hang_object(NEON_SIGN_ID)
+	_state.set_flag(NEON_SIGN_FLAG, true)
+	_notify("💡 Кальянщик повесил вывеску «Кальянная полка».")
+	_stats.log_event(_game_seconds, "СЮЖЕТ: после названия кальянной повешена неоновая вывеска")
+	_neon_hanging = false
+	_carrying = false
+	_update_input_lock()
+	_autosave()
+
+
 func _apply_bar_name() -> void:
+	_apply_neon_sign()
 	if _state == null or _save == null or not _save.persistence_enabled():
 		return
 	var title := "Hookah Empire"
@@ -4406,10 +4638,13 @@ func _prompt_bar_name() -> void:
 	var cleaned := ProfileStore.clean_name(str(result["name"]))
 	if cleaned.is_empty():
 		return
+	_neon_hanging = _state.get_flag(NEON_SIGN_FLAG, false) != true
 	_state.bar_name = cleaned
 	_apply_bar_name()
 	_notify("🪔 Твоя кальянная теперь называется «%s»" % cleaned)
 	_autosave()
+	if _neon_hanging:
+		await _hang_neon_sign()
 
 
 # --- Меню паузы (Esc) ---
@@ -4426,7 +4661,7 @@ func _open_pause_menu() -> void:
 		_remove_pause_menu()
 		_open_profile_menu(true))
 	menu.main_menu_requested.connect(_on_pause_main_menu)
-	menu.settings_requested.connect(_open_settings)
+	menu.embed_settings(_make_settings_page())
 	menu.stats_requested.connect(_toggle_stats_over_pause)
 	menu.quit_requested.connect(_on_pause_quit)
 	$UI/Root.add_child(menu)
@@ -4479,6 +4714,22 @@ func _on_pause_quit() -> void:
 var _settings_menu: SettingsMenu = null
 
 
+## Страница настроек для вставки в меню паузы / главное меню.
+func _make_settings_page() -> SettingsPanel:
+	var page := SettingsPanel.new()
+	var current := DEFAULT_VOLUME_PERCENT
+	if _save != null:
+		current = float(_save.load_setting(VOLUME_SETTING, DEFAULT_VOLUME_PERCENT))
+	page.setup(current, VisualStyle.modern, VisualStyle.show_names)
+	page.names_changed.connect(_on_friend_names_changed)
+	page.style_changed.connect(_on_graphics_style_changed)
+	page.volume_changed.connect(_set_volume_percent)
+	page.volume_committed.connect(func(percent: float) -> void:
+		if _save != null:
+			_save.save_setting(VOLUME_SETTING, percent))
+	return page
+
+
 func _open_settings() -> void:
 	if _settings_menu != null:
 		return
@@ -4486,7 +4737,9 @@ func _open_settings() -> void:
 	var current := DEFAULT_VOLUME_PERCENT
 	if _save != null:
 		current = float(_save.load_setting(VOLUME_SETTING, DEFAULT_VOLUME_PERCENT))
-	menu.setup(current)
+	menu.setup(current, VisualStyle.modern, VisualStyle.show_names)
+	menu.names_changed.connect(_on_friend_names_changed)
+	menu.style_changed.connect(_on_graphics_style_changed)
 	menu.volume_changed.connect(_set_volume_percent)
 	menu.volume_committed.connect(func(percent: float) -> void:
 		if _save != null:

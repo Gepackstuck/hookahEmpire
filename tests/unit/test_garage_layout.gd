@@ -174,7 +174,7 @@ func test_shelf_has_masks_and_books_and_signs_are_lowered() -> void:
 		kinds.append(str(prop["type"]))
 	assert_true(kinds.count("image") >= 3, "на полке картинки: серая маска и 2 книги")
 	assert_true(float(by_id["sign_neon"]["visual"]["z"]) < 40.0, "неоновая вывеска опущена к середине стены")
-	assert_true(float(by_id["sign_script"]["visual"]["z"]) < 40.0, "вывеска у двери опущена к середине стены")
+	assert_true(not by_id.has("sign_script"), "вывеска «Наши кальяны» убрана")
 
 
 func test_scroll_does_not_overlap_shelf_and_props_are_viewable() -> void:

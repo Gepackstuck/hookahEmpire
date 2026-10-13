@@ -23,7 +23,12 @@ var _opened_frame := -1
 @onready var _hint: Label = %HintLabel
 
 
+@onready var _panel: PanelContainer = $Panel
+var _classic_panel: StyleBox
+
+
 func _ready() -> void:
+	_classic_panel = _panel.get_theme_stylebox("panel")
 	visible = false
 
 
@@ -31,6 +36,7 @@ func _ready() -> void:
 func open(speakers: Dictionary) -> void:
 	_speakers = speakers
 	_opened_frame = Engine.get_process_frames()
+	_panel.add_theme_stylebox_override("panel", UiStyle.plate_style(_classic_panel, 22, 28.0, 22.0, 2.0))
 	visible = true
 
 
