@@ -123,6 +123,7 @@ func test_ivan_beat_and_dialogues() -> void:
 	assert_true(library.errors.is_empty(), str(library.errors))
 	assert_true(library.has_dialogue(ivan["dialogue"]))
 	assert_true(library.has_dialogue("ben_couch"))
+	assert_true(library.has_dialogue("ben_hire"))
 
 
 func test_beat_times_marked_once() -> void:

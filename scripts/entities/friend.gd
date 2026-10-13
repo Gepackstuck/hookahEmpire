@@ -151,6 +151,13 @@ func _draw_phone() -> void:
 	_phone.draw_rect(Rect2(origin + Vector2(-2.3, 4.3 - scroll * 8.6), Vector2(4.6, 1.2)), Color(1, 1, 1, 0.6))
 
 
+## Прервать ходьбу (без сигнала arrived).
+func stop_walking() -> void:
+	_walker.set_path([] as Array[Vector2], 0.0)
+	if _figure != null:
+		_figure.moving = false
+
+
 ## Поставить друга в точку (клетки) без ходьбы.
 func place_at(grid_pos: Vector2) -> void:
 	_walker.position = grid_pos

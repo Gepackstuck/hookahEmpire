@@ -354,6 +354,77 @@ func _detach_children(uid: String) -> int:
 	return count
 
 
+## M12: места гостей: малый стол и стулья вплотную к нему (по целой клетке), не больше max_per_table на стол.
+## Каждое место — {"table_uid", "chair_uid", "table_rect", "chair_cell", "side", "seat"}; side — где стул относительно стола (west/east/north/south).
+## Вокруг rect свободно: на furniture_margin клеток нет другой поставленной мебели (кроме ignore_uids),
+## на fixed_margin клеток нет постоянных объектов гаража. Так вокруг можно ходить.
+func ring_is_free(rect: Rect2, ignore_uids: Array, furniture_margin: float, fixed_margin: float) -> bool:
+	var furniture_ring := rect.grow(furniture_margin)
+	var fixed_ring := rect.grow(fixed_margin)
+	for entry: Dictionary in placed_entries():
+		if ignore_uids.has(str(entry["uid"])) or str(entry.get("host", "")) != "":
+			continue
+		var definition: Dictionary = items.get(str(entry["item"]), {})
+		if str(definition.get("placement", "floor")) == "wall" or bool(definition.get("flat", false)) or not bool(definition.get("blocks", true)):
+			continue
+		if entry_rect(entry).intersects(furniture_ring):
+			return false
+	for fixed: Rect2i in _fixed_blocking:
+		if Rect2(fixed).intersects(fixed_ring):
+			return false
+	return true
+
+
+func find_guest_stations(max_per_table: int = 2) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var placed := placed_entries()
+	for table: Dictionary in placed:
+		if str(table["item"]) != "small_table":
+			continue
+		var trect := entry_rect(table)
+		var count := 0
+		for chair: Dictionary in placed:
+			if str(chair["item"]) != "chair" or count >= max_per_table:
+				continue
+			var crect := entry_rect(chair)
+			if absf(crect.position.x - roundf(crect.position.x)) > 0.01 or absf(crect.position.y - roundf(crect.position.y)) > 0.01:
+				continue
+			var side := _touching_side(trect, crect)
+			if side == "":
+				continue
+			result.append({
+				"table_uid": str(table["uid"]),
+				"chair_uid": str(chair["uid"]),
+				"table_rect": trect,
+				"chair_cell": Vector2i(roundi(crect.position.x), roundi(crect.position.y)),
+				"side": side,
+				"seat": count,
+			})
+			count += 1
+	return result
+
+
+## Первое место (для совместимости и тестов); {} — мест нет.
+func find_guest_station() -> Dictionary:
+	var all := find_guest_stations()
+	return all[0] if not all.is_empty() else {}
+
+
+static func _touching_side(table: Rect2, chair: Rect2) -> String:
+	var eps := 0.01
+	var overlap_y := chair.position.y < table.end.y - eps and chair.end.y > table.position.y + eps
+	var overlap_x := chair.position.x < table.end.x - eps and chair.end.x > table.position.x + eps
+	if overlap_y and absf(chair.end.x - table.position.x) < eps:
+		return "west"
+	if overlap_y and absf(chair.position.x - table.end.x) < eps:
+		return "east"
+	if overlap_x and absf(chair.end.y - table.position.y) < eps:
+		return "north"
+	if overlap_x and absf(chair.position.y - table.end.y) < eps:
+		return "south"
+	return ""
+
+
 ## Высота поверхности, на которую поставлен предмет (0 — стоит на полу).
 func surface_lift(host_uid: String) -> float:
 	if host_uid == "":
@@ -499,7 +570,48 @@ func score_bonus() -> float:
 func object_definition(entry: Dictionary) -> Dictionary:
 	var item_id := str(entry["item"])
 	var cell := entry_cell(entry)
-	return definition_for(item_id, cell, int(entry["rotation"]), str(entry["uid"]), surface_lift(str(entry.get("host", ""))))
+	var definition := definition_for(item_id, cell, int(entry["rotation"]), str(entry["uid"]), surface_lift(str(entry.get("host", ""))))
+	# Автоповорот: стул у малого стола сам поворачивается спинкой от стола.
+	var facing := chair_facing(entry)
+	if facing != "":
+		definition["visual"]["facing"] = facing
+	return definition
+
+
+## Куда повёрнут стул у малого стола ("x", "-x", "y", "-y" — как visual.facing); "" — стул не у стола (или это не стул).
+func chair_facing(entry: Dictionary) -> String:
+	if str(entry.get("item", "")) != "chair" or not bool(entry.get("placed", false)):
+		return ""
+	var crect := entry_rect(entry)
+	for table: Dictionary in placed_entries():
+		if str(table["item"]) != "small_table":
+			continue
+		match _touching_side(entry_rect(table), crect):
+			"west":
+				return "x"
+			"east":
+				return "-x"
+			"north":
+				return "y"
+			"south":
+				return "-y"
+	return ""
+
+
+## Стоит ли предмет «в паре»: стул вплотную к малому столу или стол с хотя бы одним стулом (для подсказок при расстановке).
+func has_seat_partner(uid: String) -> bool:
+	var entry := entry_of(uid)
+	if entry.is_empty():
+		return false
+	var item_id := str(entry["item"])
+	var rect := entry_rect(entry)
+	for other: Dictionary in placed_entries():
+		var other_id := str(other["item"])
+		if (item_id == "chair" and other_id == "small_table") and _touching_side(entry_rect(other), rect) != "":
+			return true
+		if (item_id == "small_table" and other_id == "chair") and _touching_side(rect, entry_rect(other)) != "":
+			return true
+	return false
 
 
 func definition_for(item_id: String, cell: Vector2, rotation: int, object_id: String, lift: float = 0.0) -> Dictionary:

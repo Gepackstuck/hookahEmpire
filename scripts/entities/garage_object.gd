@@ -143,9 +143,16 @@ func drop_in() -> void:
 func set_door_open(open: bool, duration: float = 0.35) -> void:
 	if _door_tween != null:
 		_door_tween.kill()
-	_door_tween = create_tween()
-	_door_tween.tween_method(_apply_door_open, _door_open, 1.0 if open else 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await _door_tween.finished
+	var tween := create_tween()
+	_door_tween = tween
+	var target := 1.0 if open else 0.0
+	tween.tween_method(_apply_door_open, _door_open, target, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# Ждём таймер, а не tween.finished: убитый новым вызовом tween никогда не шлёт finished,
+	# и гость, который ждал открытия двери, застревал бы невидимым навсегда.
+	await get_tree().create_timer(duration + 0.02).timeout
+	# Таймер мог сработать раньше последнего шага tween: если дверь никто не перехватил, ставим итог.
+	if _door_tween == tween:
+		_apply_door_open(target)
 
 
 func _apply_door_open(amount: float) -> void:
@@ -689,10 +696,10 @@ func _draw_chair() -> void:
 	var color := Color.html(str(_visual.get("color", "#8a5a3c")))
 	IsoDraw.draw_shadow(self, 20.0)
 	var leg := 0.07
-	for corner in [Vector2(-0.3, -0.3), Vector2(0.3, -0.3), Vector2(-0.3, 0.3), Vector2(0.3, 0.3)]:
+	for corner in [Vector2(-0.26, -0.26), Vector2(0.26, -0.26), Vector2(-0.26, 0.26), Vector2(0.26, 0.26)]:
 		_chair_box(corner - Vector2(leg, leg), corner + Vector2(leg, leg), 0.0, 14.0, color.darkened(0.15))
-	_chair_box(Vector2(-0.36, -0.36), Vector2(0.36, 0.36), 14.0, 20.0, color)
-	_chair_box(Vector2(-0.38, -0.36), Vector2(-0.26, 0.36), 20.0, 48.0, color.lightened(0.05))
+	_chair_box(Vector2(-0.33, -0.33), Vector2(0.33, 0.33), 14.0, 20.0, color)
+	_chair_box(Vector2(-0.35, -0.33), Vector2(-0.23, 0.33), 20.0, 42.0, color.lightened(0.05))
 
 
 ## M9: мягкая тень на полу под мебелью (прямоугольник чуть больше основания).
@@ -876,12 +883,17 @@ func _draw_wall_picture() -> void:
 	draw_polyline(PackedVector2Array([corners[0], corners[1], corners[2], corners[3], corners[0]]), frame.lightened(0.3), 1.5)
 
 
-## Стул смотрит вдоль x (спинка со стороны -x) или вдоль y (visual.facing = "y": спинка со стороны -y).
+## Спинка стула: "x" — со стороны -x, "-x" — со стороны +x, "y" — со стороны -y, "-y" — со стороны +y (visual.facing).
 func _chair_box(min_c: Vector2, max_c: Vector2, z0: float, z1: float, color: Color) -> void:
-	if str(_visual.get("facing", "x")) == "y":
-		_draw_iso_box(Vector2(min_c.y, min_c.x), Vector2(max_c.y, max_c.x), z0, z1, color)
-	else:
-		_draw_iso_box(min_c, max_c, z0, z1, color)
+	match str(_visual.get("facing", "x")):
+		"y":
+			_draw_iso_box(Vector2(min_c.y, min_c.x), Vector2(max_c.y, max_c.x), z0, z1, color)
+		"-y":
+			_draw_iso_box(Vector2(min_c.y, -max_c.x), Vector2(max_c.y, -min_c.x), z0, z1, color)
+		"-x":
+			_draw_iso_box(Vector2(-max_c.x, min_c.y), Vector2(-min_c.x, max_c.y), z0, z1, color)
+		_:
+			_draw_iso_box(min_c, max_c, z0, z1, color)
 
 
 ## Занимаемый прямоугольник в клетках (для порядка отрисовки относительно персонажей).
@@ -895,6 +907,10 @@ func sort_rect() -> Rect2:
 		else:
 			rect.size.x = 0.0
 	return rect
+
+
+func is_hookah() -> bool:
+	return str(_visual.get("type", "")) == "hookah"
 
 
 func is_chair() -> bool:
@@ -1414,6 +1430,55 @@ func _build_hookah_slots() -> void:
 			_hookah_slots.append({"at": Vector2(-span * 0.5 + span * t, 0.0), "z": float(row["z"]), "color": colors[i], "taken": false})
 
 
+## Цвета докупленных кальянов (встают в тот же ряд, что и основные; ряд становится плотнее).
+const EXTRA_HOOKAH_COLORS: Array[String] = ["#b574ff", "#ffd23a", "#22e0b0", "#ff5a5a", "#8de0ff", "#e8e8e8"]
+## Ширина ряда кальянов, когда на полке докуплены дополнительные (чтобы все помещались, не задевая банки слева).
+const EXTRA_HOOKAH_SPAN := 4.3
+var _extra_hookahs := 0
+
+
+func extra_hookah_count() -> int:
+	return _extra_hookahs
+
+
+## Докупленные кальяны: ещё count мест в том же ряду полки. Снятые с полки остаются снятыми.
+func set_extra_hookahs(count: int) -> void:
+	var wanted := clampi(count, 0, EXTRA_HOOKAH_COLORS.size())
+	var previous: Array[Dictionary] = []
+	var base: Array[Dictionary] = []
+	for slot in _hookah_slots:
+		if bool(slot.get("extra", false)):
+			previous.append(slot)
+		else:
+			base.append(slot)
+	_extra_hookahs = wanted
+	_hookah_slots = base
+	_append_extra_slots(previous)
+	queue_redraw()
+
+
+## Добавляет докупленные места и равномерно раскладывает весь ряд.
+func _append_extra_slots(previous: Array[Dictionary]) -> void:
+	if _hookah_slots.is_empty():
+		return
+	var row_z := float(_hookah_slots[0]["z"])
+	for i in _extra_hookahs:
+		var taken := false
+		var color := Color.html(EXTRA_HOOKAH_COLORS[i])
+		if i < previous.size():
+			taken = bool(previous[i]["taken"])
+			color = previous[i]["color"]
+		_hookah_slots.append({"at": Vector2.ZERO, "z": row_z, "color": color, "taken": taken, "extra": true})
+	var config: Variant = _visual.get("hookah_slots")
+	var span := float(config.get("span", 4.0)) if config is Dictionary else 4.0
+	if _extra_hookahs > 0:
+		span = maxf(span, EXTRA_HOOKAH_SPAN)
+	var total := _hookah_slots.size()
+	for i in total:
+		var t := 0.5 if total == 1 else float(i) / float(total - 1)
+		_hookah_slots[i]["at"] = Vector2(-span * 0.5 + span * t, 0.0)
+
+
 func hookah_slot_count() -> int:
 	return _hookah_slots.size()
 
@@ -1472,6 +1537,7 @@ func take_hookah(index: int) -> void:
 ## Полка снова заставлена кальянами новых случайных цветов.
 func restock_hookahs() -> void:
 	_build_hookah_slots()
+	_append_extra_slots([])
 	queue_redraw()
 
 

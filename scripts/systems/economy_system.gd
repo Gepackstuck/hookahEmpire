@@ -14,6 +14,8 @@ var coal_cost: int = 40
 ## Цена одного мундштука при пополнении коробки (списывается, сколько есть).
 var mouthpiece_cost: int = 8
 var free_ingredients: Array[String] = []
+## Расширения кальянной полки по порядку: {"price": цена, "extra": сколько докупленных кальянов всего после покупки}.
+var shelf_upgrades: Array[Dictionary] = []
 var reputation_min: int = -20
 var reputation_max: int = 100
 ## Статистика за запуск (в сохранение не идёт).
@@ -154,6 +156,17 @@ func _parse(data: Dictionary) -> void:
 		errors.append("economy: mouthpiece_cost должен быть числом >= 0")
 	else:
 		mouthpiece_cost = int(piece)
+	var upgrades: Variant = data.get("shelf_upgrades", [])
+	if not (upgrades is Array):
+		errors.append("economy: shelf_upgrades должен быть массивом")
+	else:
+		shelf_upgrades.clear()
+		for raw in upgrades:
+			if raw is Dictionary and ((raw as Dictionary).get("price") is float or (raw as Dictionary).get("price") is int) \
+					and ((raw as Dictionary).get("extra") is float or (raw as Dictionary).get("extra") is int):
+				shelf_upgrades.append({"price": int(raw["price"]), "extra": int(raw["extra"])})
+			else:
+				errors.append("economy: shelf_upgrades: нужны числа price и extra")
 	var free: Variant = data.get("free_ingredients", [])
 	if not (free is Array):
 		errors.append("economy: free_ingredients должен быть массивом")

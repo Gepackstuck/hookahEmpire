@@ -9,6 +9,8 @@ const LOOK_PARTS: Array[String] = ["skin", "hair", "shirt", "pants", "shoes", "j
 
 ## Возвращает словарь гостя или пустой словарь (ошибка уже залогирована).
 static func load_guest(guest_id: String) -> Dictionary:
+	if GuestGenerator.is_generated(guest_id):
+		return GuestGenerator.make(guest_id)
 	var path := "%s/%s.json" % [DIR, guest_id]
 	if not FileAccess.file_exists(path):
 		GameLog.error("guests", "Нет файла гостя: %s" % path)

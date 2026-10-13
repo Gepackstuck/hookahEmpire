@@ -13,6 +13,9 @@ signal remove_requested(uid: String)
 signal sell_requested(uid: String)
 signal preview_requested(texture_path: String, title: String)
 signal placement_cancel_requested
+signal shelf_upgrade_requested
+## Callable без аргументов: следующее расширение полки {"name", "price", "text"} или {} (расширять больше нечего).
+var shelf_offer: Callable
 
 const PANEL_WIDTH := 430.0
 const COLUMNS := 3
@@ -410,6 +413,9 @@ func refresh() -> void:
 		child.queue_free()
 		_grid.remove_child(child)
 	if _tab == TAB_SHOP:
+		var offer: Dictionary = shelf_offer.call() if shelf_offer.is_valid() else {}
+		if not offer.is_empty():
+			_grid.add_child(_shelf_card(offer))
 		for item_id in _system.item_order:
 			_grid.add_child(_shop_card(_system.item(item_id)))
 		return
@@ -514,6 +520,38 @@ func _shop_card(data: Dictionary) -> Control:
 		if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
 			_try_buy(item_id, item_name, price))
 	return card
+
+
+func _shelf_card(offer: Dictionary) -> Control:
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(CARD_WIDTH, 0)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.add_theme_stylebox_override("panel", _card_style(true))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(box)
+	box.add_child(_info_label("🗄️", 40))
+	box.add_child(_info_label(str(offer["name"]), 14))
+	box.add_child(_info_label(str(offer["text"]), 11, Color(0.7, 0.8, 0.9)))
+	var price := int(offer["price"])
+	var button := Button.new()
+	button.text = "%d 💰" % price
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_size_override("font_size", 14)
+	if _economy == null or not _economy.can_afford(price):
+		button.modulate = Color(1.0, 0.6, 0.55, 0.75)
+	button.pressed.connect(func() -> void: _try_buy_shelf(str(offer["name"]), price))
+	box.add_child(button)
+	return card
+
+
+func _try_buy_shelf(offer_name: String, price: int) -> void:
+	if _economy == null or not _economy.can_afford(price):
+		notify("⛔ Не хватает денег: нужно %d 💰" % price)
+		_answer(false)
+		return
+	_ask("Купить «%s» за %d 💰?" % [offer_name, price], func() -> void: shelf_upgrade_requested.emit())
 
 
 func _try_buy(item_id: String, item_name: String, price: int) -> void:

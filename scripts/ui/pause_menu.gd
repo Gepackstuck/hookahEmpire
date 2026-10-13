@@ -17,30 +17,24 @@ const LOGO_PATHS: Array[String] = [
 
 
 func setup() -> void:
-	var panel := UiStyle.build_frame(self, Vector2(940, 0))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 28)
-	panel.add_child(row)
-	# Слева — случайный логотип, справа — кнопки.
+	var panel := UiStyle.build_frame(self, Vector2(620, 0))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	panel.add_child(box)
+	# Сверху — случайный логотип, под ним пункты списком.
 	var logo_path := LOGO_PATHS[randi() % LOGO_PATHS.size()]
 	if ResourceLoader.exists(logo_path):
 		var logo := TextureRect.new()
 		logo.texture = load(logo_path)
 		logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		logo.custom_minimum_size = Vector2(500, 380)
-		logo.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(logo)
+		logo.custom_minimum_size = Vector2(520, 250)
+		box.add_child(logo)
 	else:
 		var title := UiStyle.label("Hookah Empire", 40, UiStyle.GOLD)
-		title.custom_minimum_size = Vector2(500, 0)
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		row.add_child(title)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 10)
-	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(box)
-	var pause := UiStyle.label("Пауза", 30, UiStyle.GOLD)
+		box.add_child(title)
+	var pause := UiStyle.label("Пауза", 28, UiStyle.GOLD)
 	pause.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(pause)
 	box.add_child(_button("▶  Продолжить", resume_requested))

@@ -10,7 +10,7 @@ signal goal_reset_requested
 signal money_zero_requested
 
 ## Варианты ускорения игры (Engine.time_scale). Выше ×10 кадры становятся слишком «крупными»: таймеры и анимации теряют точность.
-const SPEEDS: Array[float] = [1.0, 10.0]
+const SPEEDS: Array[float] = [1.0, 3.0, 10.0]
 
 var _speed_buttons: Array[Button] = []
 

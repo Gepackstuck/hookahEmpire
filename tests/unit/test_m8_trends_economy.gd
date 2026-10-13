@@ -102,6 +102,19 @@ func test_economy_coal_charge_never_blocks() -> void:
 	state.free()
 
 
+func test_economy_shelf_upgrades_loaded() -> void:
+	var state := GameStateScript.new()
+	var economy := EconomySystem.load_default(state, IngredientCatalog.load_default())
+	assert_true(economy.errors.is_empty(), str(economy.errors))
+	assert_true(economy.shelf_upgrades.size() >= 2)
+	var last_extra := 0
+	for upgrade in economy.shelf_upgrades:
+		assert_true(int(upgrade["price"]) > 0)
+		assert_true(int(upgrade["extra"]) > last_extra, "каждое расширение добавляет кальяны")
+		last_extra = int(upgrade["extra"])
+	state.free()
+
+
 func test_economy_mouthpiece_charge() -> void:
 	var state := GameStateScript.new()
 	var economy := EconomySystem.load_default(state, IngredientCatalog.load_default())

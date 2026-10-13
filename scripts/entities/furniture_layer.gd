@@ -148,12 +148,17 @@ func sync() -> void:
 			_remove_node(str(uid))
 	for uid in wanted:
 		var entry: Dictionary = wanted[uid]
-		var signature := "%s:%s:%s:%s" % [str(entry["item"]), str(entry["cell"]), str(entry["rotation"]), str(entry.get("host", ""))]
+		var signature := "%s:%s:%s:%s:%s" % [str(entry["item"]), str(entry["cell"]), str(entry["rotation"]), str(entry.get("host", "")), system.chair_facing(entry)]
 		if _signatures.get(uid, "") == signature:
 			continue
 		_remove_node(str(uid))
 		_add_node(entry, signature)
 	set_selected(_selected_uid)
+
+
+## Нода поставленного предмета по uid (null — такого нет).
+func node_of(uid: String) -> GarageObject:
+	return _nodes.get(uid) as GarageObject
 
 
 func _add_node(entry: Dictionary, signature: String) -> void:

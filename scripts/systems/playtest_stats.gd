@@ -20,6 +20,12 @@ var visits: Array[Dictionary] = []
 ## Рецепты, ставшие сильными: {"name", "trends": Array}.
 var strong_list: Array[Dictionary] = []
 const VISIT_LOG_SHOWN := 10
+## Журнал событий рассадки/прихода гостей (для разбора поведения): "м:сс текст".
+var events: Array[String] = []
+const EVENT_LOG_MAX := 80
+const EVENT_LOG_SHOWN := 30
+## Причина, по которой новый гость не приходит -> игровые секунды простоя.
+var arrival_blocked: Dictionary = {}
 
 
 func _init() -> void:
@@ -53,6 +59,49 @@ func beat_lines() -> Array[String]:
 		parts.append("%s %s" % [str(key), format_time(float(beat_times[key]))])
 	lines.append("Тайминги интро (игровое время): " + ", ".join(parts))
 	return lines
+
+
+## Добавляет запись в журнал событий (game_seconds — игровое время).
+func log_event(game_seconds: float, text: String) -> void:
+	events.append("%s %s" % [format_time(game_seconds), text])
+	while events.size() > EVENT_LOG_MAX:
+		events.pop_front()
+
+
+func add_arrival_blocked(reason: String, seconds: float) -> void:
+	arrival_blocked[reason] = float(arrival_blocked.get(reason, 0.0)) + seconds
+
+
+## Строки журнала рассадки: итоги прихода гостей и последние события.
+func seating_lines() -> Array[String]:
+	var lines: Array[String] = []
+	var seats := count("seat_single") + count("seat_company") + count("seat_sofa_single") + count("seat_sofa_company")
+	lines.append("Рассадка: одиночек %d (из них к соседу за стол %d), компаний %d, с дивана одиночек %d / компаний %d, ждали на диване: одиночек %d, компаний %d" % [
+		count("seat_single"), count("seat_single_neighbor"), count("seat_company"), count("seat_sofa_single"), count("seat_sofa_company"), count("wait_single"), count("wait_company")])
+	lines.append("Приходы: всего %d; броски на компанию: пара мест свободна %d раз, выпала компания %d, нет %d; пары мест не было %d" % [
+		seats, count("company_roll_pair_free"), count("company_roll_yes"), count("company_roll_no"), count("company_no_pair")])
+	lines.append("Дольше всех гость ждал внимания кальянщика (автопилот): %d игровых сек" % count("max_wait_service"))
+	lines.append("Знакомств за столом: %d; отказов сесть к соседу (вкусы не совпали): %d" % [count("guest_pairs"), count("neighbor_rejected")])
+	if arrival_blocked.is_empty():
+		lines.append("Простой прихода (игровые сек): —")
+	else:
+		var parts: PackedStringArray = []
+		for reason in arrival_blocked:
+			parts.append("%s %.0f" % [str(reason), float(arrival_blocked[reason])])
+		lines.append("Простой прихода (игровые сек): " + ", ".join(parts))
+	lines.append("Журнал рассадки (последние %d):" % EVENT_LOG_SHOWN)
+	var from := maxi(events.size() - EVENT_LOG_SHOWN, 0)
+	if events.is_empty():
+		lines.append("  —")
+	for i in range(from, events.size()):
+		lines.append("  " + events[i])
+	return lines
+
+
+## Запоминает максимум значения за запуск (например, пик одновременных гостей).
+func set_max(key: String, value: int) -> void:
+	if value > int(counters.get(key, 0)):
+		counters[key] = value
 
 
 func count(key: String) -> int:
@@ -99,7 +148,14 @@ func visit_lines() -> Array[String]:
 	var from := maxi(visits.size() - VISIT_LOG_SHOWN, 0)
 	for i in range(from, visits.size()):
 		var v: Dictionary = visits[i]
-		lines.append("%d) %s: хочет [%s], не любит [%s]; тренд «%s»; рецепт %s, балл %.1f, оплата %d" % [i + 1, str(v.get("guest_id", "?")).trim_prefix("friend_"), _prefs_text(v.get("prefs", {})), _prefs_text(v.get("dislikes", {})), str(v.get("trend_name", "")) if str(v.get("trend_name", "")) != "" else "—", str(v.get("recipe_name", v.get("recipe_id", "?"))), float(v.get("final_score", 0.0)), int(v.get("payment", 0))])
+		var where := ""
+		if str(v.get("station", "")) != "":
+			where = ", место %s" % str(v["station"])
+			if str(v.get("companion", "")) != "":
+				where += ", с компаньоном %s" % str(v["companion"])
+			if str(v.get("neighbor", "")) != "":
+				where += ", сосед %s" % str(v["neighbor"])
+		lines.append("%d) %s%s: хочет [%s], не любит [%s]; тренд «%s»; рецепт %s, балл %.1f, оплата %d" % [i + 1, str(v.get("name", str(v.get("guest_id", "?")).trim_prefix("friend_"))), where, _prefs_text(v.get("prefs", {})), _prefs_text(v.get("dislikes", {})), str(v.get("trend_name", "")) if str(v.get("trend_name", "")) != "" else "—", str(v.get("recipe_name", v.get("recipe_id", "?"))), float(v.get("final_score", 0.0)), int(v.get("payment", 0))])
 	return lines
 
 
@@ -122,7 +178,18 @@ func reset() -> void:
 	beat_times.clear()
 	visits.clear()
 	strong_list.clear()
+	events.clear()
+	arrival_blocked.clear()
 	started_msec = Time.get_ticks_msec()
+
+
+## Игровое время (секунды) — Main обновляет каждый кадр; при ускорении идёт быстрее реального.
+var game_seconds := 0.0
+
+
+static func clock_text(total_seconds: float) -> String:
+	var seconds := int(total_seconds)
+	return "%d:%02d" % [seconds / 60, seconds % 60]
 
 
 func uptime_text() -> String:
@@ -133,7 +200,7 @@ func uptime_text() -> String:
 ## Строки итогов за запуск (показываются под «живыми» значениями).
 func summary_lines() -> Array[String]:
 	var lines: Array[String] = []
-	lines.append("Запуск: %s" % uptime_text())
+	lines.append("Игровое время: %s, реальное: %s" % [clock_text(game_seconds), uptime_text()])
 	lines.append("Гостей обслужено: %d, средний балл %.1f, оплата всего %d (в среднем %.1f)" % [sessions, average_score(), payment_sum, average_payment()])
 	var parts: PackedStringArray = []
 	for guest_id in guests:

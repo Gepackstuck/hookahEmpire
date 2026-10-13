@@ -53,6 +53,13 @@ func setup(current_name: String) -> void:
 	_edit.grab_focus.call_deferred()
 
 
+## Тест-прогон: вписывает название и подтверждает окно сам.
+func autosubmit(bar_name: String) -> void:
+	_edit.text = bar_name
+	_refresh_ok()
+	_submit()
+
+
 func _refresh_ok() -> void:
 	_ok.disabled = ProfileStore.clean_name(_edit.text).is_empty()
 

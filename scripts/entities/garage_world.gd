@@ -11,6 +11,8 @@ signal dialogue_requested(dialogue_id: String)
 signal action_requested(action_id: String)
 signal image_requested(texture_path: String, title: String, description: String)
 signal friend_arrived(guest_id: String)
+## M12: гость без места дошёл до точки ожидания у входа (отсчёт его терпения запускает Main).
+signal waiting_guest_arrived(guest_id: String)
 
 const LAYOUT_PATH := "res://data/garage/garage_main.json"
 const PLAYER_SCENE := preload("res://scenes/characters/Player.tscn")
@@ -31,6 +33,8 @@ const PREP_HOSE_END := Vector2(40.0, 12.0)
 const FRIEND_TALK_PROMPT := "Поговорить"
 const SIT_CAMERA_ZOOM := 3.0
 const FRIEND_TALK_RADIUS := 1.4
+## M12: где стоит гость, для которого нет места (по порядку, берётся первая свободная клетка с путём от двери).
+const WAIT_CELL_CANDIDATES: Array[Vector2i] = [Vector2i(3, 9), Vector2i(3, 10), Vector2i(2, 9), Vector2i(2, 10), Vector2i(4, 10), Vector2i(3, 11)]
 
 var _grid: GarageGrid = null
 var _layout: GarageLayout = null
@@ -47,23 +51,25 @@ var _coal_cell := Vector2i(-1, -1)
 var _prep_cell := Vector2i(-1, -1)
 var _seat_cell := Vector2i(-1, -1)
 var _sitting_busy := false
-## Цвет кальяна, который взяли с полки (его же несут, ставят на стол и подают гостю).
-var _hookah_color := Color("#22b8ff")
-## Шланг: концы плавно едут к целевым точкам (колбэки возвращают координаты Entities).
-var _hose: HoseLine = null
-var _hose_start_fn := Callable()
-var _hose_end_fn := Callable()
-var _hose_aim_fn := Callable()
-var _hose_cover_fn := Callable()
-var _hose_cover_id := ""
-## Начало шланга плавно едет (только когда мастер тянет его к клапану); иначе приклеено к кальяну.
-var _hose_start_smooth := false
-## Вид ручки шланга текущего кальяна (случайный при выборе кальяна).
-var _handle_style := 0
-var _hose_holder: Node2D = null
-var _hose_at_guest := false
-var _warming_up := false
-var _guest_piece := Color("#e29a2e")
+## M12: кальяны в мире. _u — «активный» (тот, что мастер сейчас готовит, несёт или ставит); у каждого кальяна свой шланг и состояние.
+
+## station_id -> подпись сборки места (uid стола, uid стула, прямоугольник стола, клетка стула).
+var _extra_signatures: Dictionary = {}
+## Место, у стола которого игрок взаимодействовал последним (Main узнаёт, к какому гостю относится действие).
+var _last_action_station_id := GuestStation.MAIN_ID
+var _last_interacted_id := ""
+## Занятые места на диване: ключ места -> guest_id.
+var _sofa_taken: Dictionary = {}
+var _u: HookahUnit = HookahUnit.new()
+var _units: Array[HookahUnit] = []
+## Места гостей за столами: id -> GuestStation (s1 из раскладки, s2 из купленных стола и стула).
+var _stations: Dictionary = {}
+## guest_id -> id места, за которым он сидит.
+var _guest_station: Dictionary = {}
+## Спутники компании: guest_id -> true (кальян и заказ у них общие с гостем другого места).
+var _companions: Dictionary = {}
+## Место, за столом которого кальянщик работает сейчас (подаёт, курит).
+var _player_station: GuestStation = null
 ## Сообщение о вкусе кальяна: показывается после нескольких затяжек игрока.
 var _pending_smoke_message := ""
 var _puffs_until_message := 0
@@ -96,6 +102,16 @@ func _ready() -> void:
 	_prep_cell = layout.hookah_prep_cell
 	_coal_cell = layout.hookah_coal_cell
 	_seat_cell = layout.player_seat_cell
+	var main_station := GuestStation.new()
+	main_station.id = GuestStation.MAIN_ID
+	main_station.table_id = "table_guest"
+	main_station.table_uid = "table_guest"
+	main_station.hookah_id = HOOKAH_OBJECT_ID
+	main_station.serve_cell = _serve_cell
+	main_station.coal_cell = _coal_cell
+	main_station.seat_cell = _seat_cell
+	_stations[main_station.id] = main_station
+	_player_station = main_station
 	_build_objects(layout)
 	# Стулья гостей непроходимы и пока пустые (в раскладке они не блокируют, чтобы путь гостя и проверки мебели считали клетку свободной).
 	# При приходе гостя spawn_friend освобождает его клетку на время расчёта пути, после ухода она блокируется снова.
@@ -112,8 +128,8 @@ func _ready() -> void:
 	_player.inhale_started.connect(_on_inhale)
 	_player.inhale_started.connect(_on_player_inhale)
 	_player.inhale_started.connect(func(_duration: float) -> void: _hose_take(_player))
-	_hose = HoseLine.new()
-	add_child(_hose)
+	_units.append(_u)
+	_u.hose = _make_hose()
 	_player.stood_up.connect(_on_player_stood_up)
 	_camera_bounds = GarageBackdrop.screen_bounds(layout.size)
 	_player.set_camera_limits(_camera_bounds)
@@ -141,6 +157,7 @@ func _process(delta: float) -> void:
 	_interactions.update_focus(_player.grid_position)
 	_update_marker(delta)
 	_update_gazes()
+	_sync_buddy_hire_rect()
 	_update_pointer_hover()
 
 
@@ -171,6 +188,16 @@ func _sort_entities() -> void:
 				chairs.append(node as GarageObject)
 		elif (node is Player and not (node as Player).seated) or (node is Friend and not (node as Friend).is_seated()):
 			characters.append(node)
+	# Кальян стоит на столе: порядок по y даёт «за столом» для левой половины длинного стола и срезает основание.
+	# Кальян, стоящий над столом, рисуется сразу поверх этого стола.
+	for node in nodes.duplicate():
+		if node is GarageObject and (node as GarageObject).is_hookah() and node.visible:
+			var hookah_at := (node as GarageObject).sort_rect().get_center()
+			for large in larges:
+				if large != node and large.sort_rect().has_point(hookah_at):
+					nodes.erase(node)
+					nodes.insert(nodes.find(large) + 1, node)
+					break
 	for character in characters:
 		var at: Vector2 = character.get("grid_position")
 		for large in larges:
@@ -190,6 +217,15 @@ func _sort_entities() -> void:
 	# Сидящий (гость или кальянщик) рисуется поверх своего стула (спинка у него за спиной), но под столом.
 	for node in nodes.duplicate():
 		var is_seated_person := (node is Friend and (node as Friend).is_seated()) or (node is Player and (node as Player).seated)
+		if is_seated_person and node is Friend and _guest_routes.get((node as Friend).guest_id, {}).has("sofa_key"):
+			# Гость на диване рисуется поверх дивана (иначе левое место «уходит под диван»).
+			var sofa_at: Vector2 = node.get("grid_position")
+			for large in larges:
+				if large.sort_rect().grow(0.3).has_point(sofa_at):
+					nodes.erase(node)
+					nodes.insert(nodes.find(large) + 1, node)
+					break
+			continue
 		if is_seated_person:
 			var at: Vector2 = node.get("grid_position")
 			var seat: GarageObject = null
@@ -390,7 +426,7 @@ func set_input_locked(locked: bool) -> void:
 
 
 ## Друг заходит в гараж у entry_position, идёт к stand_cell и становится собеседником.
-func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector2i, stand_cell: Vector2i, dialogue_id: String, seat: Dictionary = {}) -> bool:
+func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector2i, stand_cell: Vector2i, dialogue_id: String, seat: Dictionary = {}, station_id: String = GuestStation.MAIN_ID, companion_of: String = "") -> bool:
 	if _grid == null:
 		GameLog.error("garage", "spawn_friend: гараж не загружен")
 		return false
@@ -410,17 +446,195 @@ func spawn_friend(guest: Dictionary, entry_position: Vector2, entry_cell: Vector
 	friend.apply_look(guest.get("look", {}))
 	_guest_routes[friend.guest_id] = {"entry_position": entry_position, "entry_cell": entry_cell, "stand_cell": stand_cell}
 	_objects[friend.guest_id] = friend
-	friend.inhale_started.connect(_on_inhale)
+	if companion_of != "":
+		# Спутник сидит на своём месте, но шланг, кальян и мундштук — гостя с места companion_of.
+		_companions[friend.guest_id] = true
+		_guest_station[friend.guest_id] = companion_of
+		if _stations.has(station_id):
+			(_stations[station_id] as GuestStation).companion_id = friend.guest_id
+	else:
+		_guest_station[friend.guest_id] = station_id
+		if _stations.has(station_id):
+			(_stations[station_id] as GuestStation).guest_id = friend.guest_id
+	_wire_seated_friend(friend)
+	friend.arrived.connect(_on_friend_arrived.bind(friend, guest, stand_cell, dialogue_id, seat))
+	GameLog.info("garage", "%s заходит в гараж" % str(guest["name"]))
+	_enter_through_door(friend, path)
+	return true
+
+
+## Затяжки сидящего гостя: дым, шланг его кальяна и сигнал для Main.
+func _wire_seated_friend(friend: Friend) -> void:
+	friend.inhale_started.connect(func(duration: float) -> void: _on_inhale(duration, friend))
 	# Игрок и гость не тянут кальян одновременно: между их затяжками есть пауза.
 	friend.smoke_emitter().partner = _player.smoke_emitter()
 	_player.smoke_emitter().partner = friend.smoke_emitter()
 	friend.inhale_started.connect(func(_duration: float) -> void: friend_inhaled.emit(friend.guest_id))
 	friend.inhale_started.connect(func(_duration: float) -> void: _hose_take(friend))
-	_guest_piece = friend.piece_color()
-	friend.arrived.connect(_on_friend_arrived.bind(friend, guest, stand_cell, dialogue_id, seat))
-	GameLog.info("garage", "%s заходит в гараж" % str(guest["name"]))
+
+
+## M12: гость приходит, а сесть негде: заходит через дверь и стоит у входа (без разговора и заказа), пока Main не отправит его обратно.
+func spawn_waiting_guest(guest: Dictionary, entry_position: Vector2, entry_cell: Vector2i) -> bool:
+	if _grid == null:
+		return false
+	var wait_cell := Vector2i(-1, -1)
+	var path: Array[Vector2] = []
+	# Сначала диван: ждать удобнее сидя (края дивана; центр — место Бэна, на него гости не садятся).
+	var sofa_seat: Dictionary = {}
+	for seat: Dictionary in _sofa_seats():
+		if _sofa_taken.has(seat["key"]):
+			continue
+		var approach: Vector2i = seat["approach"]
+		if not _grid.is_cell_walkable(approach):
+			continue
+		var sofa_path := _grid.find_path(entry_cell, approach)
+		if sofa_path.is_empty():
+			continue
+		sofa_seat = seat
+		wait_cell = approach
+		path = sofa_path
+		break
+	if wait_cell.x < 0:
+		for cell in WAIT_CELL_CANDIDATES:
+			if not _grid.is_cell_walkable(cell):
+				continue
+			path = _grid.find_path(entry_cell, cell)
+			if not path.is_empty():
+				wait_cell = cell
+				break
+	if wait_cell.x < 0:
+		GameLog.error("garage", "spawn_waiting_guest: нет свободной клетки ожидания с путём от двери")
+		return false
+	path.push_front(entry_position)
+	var friend := FRIEND_SCENE.instantiate() as Friend
+	_entities.add_child(friend)
+	friend.setup(str(guest["id"]), str(guest.get("emoji", "")), entry_position, str(guest.get("sprite_faces", "right")) == "right")
+	friend.apply_look(guest.get("look", {}))
+	friend.set_meta("waiting_guest", true)
+	var route := {"entry_position": entry_position, "entry_cell": entry_cell, "stand_cell": wait_cell, "waiting": true}
+	if not sofa_seat.is_empty():
+		route["sofa_key"] = sofa_seat["key"]
+		route["approach_point"] = Vector2(wait_cell) + Vector2(0.5, 0.5)
+		route["seat_point"] = sofa_seat["point"]
+		route["face_left"] = sofa_seat["face_left"]
+		_sofa_taken[sofa_seat["key"]] = friend.guest_id
+	_guest_routes[friend.guest_id] = route
+	_objects[friend.guest_id] = friend
+	friend.arrived.connect(_on_waiting_guest_arrived.bind(friend, wait_cell), CONNECT_ONE_SHOT)
+	GameLog.info("garage", "%s заходит в гараж и ждёт места" % str(guest.get("name", friend.guest_id)))
 	_enter_through_door(friend, path)
 	return true
+
+
+func _on_waiting_guest_arrived(friend: Friend, wait_cell: Vector2i) -> void:
+	var route: Dictionary = _guest_routes.get(friend.guest_id, {})
+	if route.has("sofa_key"):
+		waiting_guest_arrived.emit(friend.guest_id)
+		_sofa_sit(friend, route)
+		return
+	# Клетка ожидающего становится непроходимой, как только игрок из неё вышел (как у сидящих гостей).
+	_pending_blocks.append(Rect2i(wait_cell, Vector2i.ONE))
+	waiting_guest_arrived.emit(friend.guest_id)
+
+
+## Гость подходит к дивану, делает шаг к своему месту и садится.
+func _sofa_sit(friend: Friend, route: Dictionary) -> void:
+	var step: Array[Vector2] = [route["seat_point"]]
+	friend.walk_path(step)
+	await friend.arrived
+	if not is_instance_valid(friend) or _guest_routes.get(friend.guest_id, {}).get("sofa_key", "") != route["sofa_key"]:
+		return
+	await friend.sit_down_animated(bool(route["face_left"]), false)
+
+
+## Места для ожидающих на диване: два по краям каждого дивана длиной от трёх клеток (центр занят Бэном).
+func _sofa_seats() -> Array[Dictionary]:
+	var seats: Array[Dictionary] = []
+	if _furniture_layer == null or _furniture_layer.system == null:
+		return seats
+	var system := _furniture_layer.system
+	for entry: Dictionary in system.placed_entries():
+		if str(entry["item"]) != "couch":
+			continue
+		var rect := system.entry_rect(entry)
+		var along_x := rect.size.x >= rect.size.y
+		if maxf(rect.size.x, rect.size.y) < 3.0:
+			continue
+		var center := rect.get_center()
+		for side in [-1, 1]:
+			var offset := float(side)
+			var point := center + (Vector2(offset, 0.12) if along_x else Vector2(0.12, offset))
+			var approach := Vector2i(floori(center.x + offset), ceili(rect.end.y - 0.001)) if along_x else Vector2i(ceili(rect.end.x - 0.001), floori(center.y + offset))
+			seats.append({"key": "%s:%d" % [str(entry["uid"]), side], "point": point, "approach": approach, "face_left": along_x})
+	return seats
+
+
+## Ожидающий гость встаёт (с дивана или от двери) и идёт занимать освободившееся место за столом.
+func seat_waiting_guest(guest_id: String, station_id: String, companion_of: String = "") -> void:
+	var friend := _objects.get(guest_id) as Friend
+	var station := _station(station_id)
+	if friend == null or station == null or station.guest_id != "" or station.companion_id != "" or not bool(friend.get_meta("waiting_guest", false)):
+		return
+	var guest := GuestCatalog.load_guest(guest_id)
+	if guest.is_empty():
+		return
+	var route: Dictionary = _guest_routes.get(guest_id, {})
+	var stand_cell := station.guest_cell
+	if companion_of != "":
+		station.companion_id = guest_id
+		_companions[guest_id] = true
+		_guest_station[guest_id] = companion_of
+	else:
+		station.guest_id = guest_id
+		_guest_station[guest_id] = station_id
+	friend.set_meta("waiting_guest", false)
+	for connection in friend.arrived.get_connections():
+		friend.arrived.disconnect(connection["callable"])
+	friend.stand_up()
+	if route.has("sofa_key"):
+		_sofa_taken.erase(route["sofa_key"])
+		var out: Array[Vector2] = [route["approach_point"]]
+		var reached := [false]
+		friend.arrived.connect(func() -> void: reached[0] = true, CONNECT_ONE_SHOT)
+		friend.walk_path(out)
+		while not reached[0]:
+			await get_tree().process_frame
+	else:
+		var wait_rect := Rect2i(route.get("stand_cell", Vector2i(-1, -1)), Vector2i.ONE)
+		_pending_blocks.erase(wait_rect)
+		_grid.set_blocked_rect(wait_rect, false)
+	var stand_rect := Rect2i(stand_cell, Vector2i.ONE)
+	_pending_blocks.erase(stand_rect)
+	_grid.set_blocked_rect(stand_rect, false)
+	var path := _grid.find_path(Vector2i(friend.grid_position.floor()), stand_cell)
+	_guest_routes[guest_id] = {"entry_position": route.get("entry_position", friend.grid_position), "entry_cell": route.get("entry_cell", stand_cell), "stand_cell": stand_cell}
+	_wire_seated_friend(friend)
+	friend.arrived.connect(_on_friend_arrived.bind(friend, guest, stand_cell, "", station_seat(station_id)))
+	if path.is_empty():
+		# Дойти нельзя: гость просто появляется на месте.
+		friend.place_at(Vector2(stand_cell) + Vector2(0.5, 0.5))
+		friend.arrived.emit.call_deferred()
+		return
+	friend.walk_path(path)
+
+
+## Сколько гостей сейчас в гараже (включая идущих и ждущих места).
+func guests_present() -> int:
+	var count := 0
+	for node in _objects.values():
+		if node is Friend:
+			count += 1
+	return count
+
+
+## id гостей, которые ждут места (стоят у входа).
+func waiting_guest_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for object_id in _objects:
+		var node: Variant = _objects[object_id]
+		if node is Friend and bool((node as Friend).get_meta("waiting_guest", false)):
+			ids.append(str(object_id))
+	return ids
 
 
 ## M10: Бэн заходит в гараж (через дверь) и идёт к wait_cell; при through_door = false появляется сразу (загрузка игры).
@@ -511,8 +725,11 @@ func clear_all_head_labels() -> void:
 
 
 ## M7: состояние углей кальяна на столе гостя (0 остыли … 3 сгорели) и эмодзи-индикатор над ним.
-func set_hookah_heat(coal_state: int, badge: String, subtle_badge: bool = false) -> void:
-	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
+func set_hookah_heat(coal_state: int, badge: String, subtle_badge: bool = false, station_id: String = GuestStation.MAIN_ID) -> void:
+	var station := _station(station_id)
+	if station == null:
+		return
+	var hookah: Variant = _objects.get(station.hookah_id)
 	if hookah is GarageObject:
 		(hookah as GarageObject).set_coal_state(coal_state)
 		(hookah as GarageObject).set_badge(badge, subtle_badge)
@@ -520,12 +737,15 @@ func set_hookah_heat(coal_state: int, badge: String, subtle_badge: bool = false)
 
 ## Кальянщик меняет угли на кальяне гостя: подходит к столу (если стоит далеко), снимает старые, кладёт свежие.
 ## Корутина: завершается, когда на кальяне свежие угли.
-func service_coals(seconds: float) -> void:
-	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
-	if not (hookah is GarageObject) or _player == null:
+func _service_coals_impl(seconds: float, station_id: String = GuestStation.MAIN_ID) -> void:
+	var station := _station(station_id)
+	if station == null or _player == null:
+		return
+	var hookah: Variant = _objects.get(station.hookah_id)
+	if not (hookah is GarageObject):
 		return
 	# Угли меняют со стороны стола, где лежит лоток со свежими углями.
-	var work_cell := _coal_cell if _coal_cell.x >= 0 and _grid.is_cell_walkable(_coal_cell) else _serve_cell
+	var work_cell := station.coal_cell if station.coal_cell.x >= 0 and _grid.is_cell_walkable(station.coal_cell) else station.serve_cell
 	if work_cell.x >= 0 and Vector2(work_cell).distance_to(_player.grid_position) > 1.2:
 		await _walk_to(work_cell)
 	_player.face_toward((hookah as GarageObject).position.x)
@@ -542,6 +762,9 @@ func set_idle_work(object_id: String, on: bool) -> void:
 
 ## Прерывает идущую автоматическую ходьбу кальянщика (например, когда у гостя появилось настоящее дело).
 func cancel_walk() -> void:
+	# Кальянщик занят переносом/мойкой: чужая отмена ходьбы сломала бы это действие.
+	if _action_busy:
+		return
 	if _player != null:
 		_player.cancel_auto_walk()
 
@@ -599,7 +822,7 @@ func play_drink(seconds: float, line: String) -> void:
 func _idle_wash(node: Variant, seconds: float, stop: Callable, scrub: bool) -> void:
 	var sink := node as GarageObject
 	if sink != null:
-		var color := _hookah_color
+		var color := _u.color
 		color.a = 1.0
 		sink.set_washing(true, color if scrub else Color(0, 0, 0, 0), "flask" if randf() < 0.5 else "hose")
 	if scrub:
@@ -727,10 +950,11 @@ func walk_to_friend(guest_id: String) -> void:
 	if not (node is Friend) or route.is_empty() or _player == null:
 		return
 	var stand: Vector2i = route["stand_cell"]
+	var serve_cell: Vector2i = _station_for(guest_id).serve_cell
 	var player_cell := Vector2i(_player.grid_position.floor())
 	# Заказ принимаем у угла стола (там же, где подаём кальян): сбоку от гостя, лицом к нему.
-	if _serve_cell.x >= 0 and _grid.is_cell_walkable(_serve_cell) and not _grid.find_path(player_cell, _serve_cell).is_empty():
-		await _walk_to(_serve_cell)
+	if serve_cell.x >= 0 and _grid.is_cell_walkable(serve_cell) and not _grid.find_path(player_cell, serve_cell).is_empty():
+		await _walk_to(serve_cell)
 		_player.face_toward((node as Friend).position.x)
 		return
 	# Подходим сбоку от гостя (вдоль стола), а не со спины; со спины — только если сбоку не пройти.
@@ -745,7 +969,7 @@ func walk_to_friend(guest_id: String) -> void:
 ## Есть ли в гараже гость (идёт, сидит или ждёт).
 func has_friend() -> bool:
 	for node in _objects.values():
-		if node is Friend:
+		if node is Friend and not bool((node as Friend).get_meta("waiting_guest", false)):
 			return true
 	return false
 
@@ -759,12 +983,26 @@ func friend_leave(guest_id: String) -> void:
 	var friend := node as Friend
 	var route: Dictionary = _guest_routes.get(guest_id, {})
 	_interactions.unregister(guest_id)
+	# Гость уходит — спутник уходит вместе с ним.
+	if not _companions.has(guest_id):
+		var buddy := companion_at(str(_guest_station.get(guest_id, GuestStation.MAIN_ID)))
+		if buddy != "":
+			friend_leave(buddy)
 	# Приход гостя больше не должен срабатывать на этот путь.
 	for connection in friend.arrived.get_connections():
 		friend.arrived.disconnect(connection["callable"])
 	friend.set_smoking(false)
 	friend.stand_up()
 	_hose_release_if_idle()
+	# С дивана сначала выходим к клетке перед ним (идти по сетке из занятой клетки дивана нельзя).
+	if route.has("sofa_key"):
+		_sofa_taken.erase(route["sofa_key"])
+		var out: Array[Vector2] = [route["approach_point"]]
+		var out_done := [false]
+		friend.arrived.connect(func() -> void: out_done[0] = true, CONNECT_ONE_SHOT)
+		friend.walk_path(out)
+		while not out_done[0]:
+			await get_tree().process_frame
 	var stand_cell: Vector2i = route.get("stand_cell", Vector2i(friend.grid_position.floor()))
 	var stand_rect := Rect2i(stand_cell, Vector2i.ONE)
 	_pending_blocks.erase(stand_rect)
@@ -772,8 +1010,9 @@ func friend_leave(guest_id: String) -> void:
 	var exit_position: Vector2 = route.get("entry_position", friend.grid_position)
 	var path := _grid.find_path(Vector2i(friend.grid_position.floor()), route.get("entry_cell", stand_cell))
 	path.append(exit_position)
-	# Пустой стул снова непроходим (иначе сквозь него можно ходить).
-	_pending_blocks.append(stand_rect)
+	# Пустой стул снова непроходим (иначе сквозь него можно ходить); клетка ожидания у входа остаётся свободной.
+	if not bool(route.get("waiting", false)):
+		_pending_blocks.append(stand_rect)
 	var done := [false]
 	friend.arrived.connect(func() -> void: done[0] = true, CONNECT_ONE_SHOT)
 	friend.walk_path(path)
@@ -790,32 +1029,386 @@ func friend_leave(guest_id: String) -> void:
 	_player.smoke_emitter().partner = null
 	_objects.erase(guest_id)
 	_guest_routes.erase(guest_id)
+	var left_station_id := str(_guest_station.get(guest_id, GuestStation.MAIN_ID))
+	_guest_station.erase(guest_id)
+	if _companions.has(guest_id):
+		_companions.erase(guest_id)
+		for station: GuestStation in _stations.values():
+			if station.companion_id == guest_id:
+				station.companion_id = ""
+	if _stations.has(left_station_id) and (_stations[left_station_id] as GuestStation).guest_id == guest_id:
+		(_stations[left_station_id] as GuestStation).guest_id = ""
 	friend.queue_free()
 	GameLog.info("garage", "Гость %s ушёл" % guest_id)
+
+
+# --- Очередь действий кальянщика ---------------------------------------------------------
+## Кальянщик один: переносы кальяна, мойка и замена углей идут по очереди (иначе два гостя ломают состояние кальянов — у каждого свой шланг).
+var _action_busy := false
+
+
+## Кальянщик сейчас занят действием с кальяном (перенос, мойка, угли).
+func is_action_busy() -> bool:
+	return _action_busy
+
+
+func _lock_action() -> void:
+	while _action_busy:
+		await get_tree().process_frame
+	_action_busy = true
+
+
+func _unlock_action() -> void:
+	_action_busy = false
+
+
+func fetch_random_hookah() -> void:
+	await _lock_action()
+	await _fetch_random_hookah_impl()
+	_unlock_action()
+
+
+func carry_hookah_to_guest_table(station_id: String = GuestStation.MAIN_ID) -> void:
+	await _lock_action()
+	await _carry_hookah_to_guest_table_impl(station_id)
+	_unlock_action()
+
+
+func carry_hookah_to_prep_table(station_id: String = GuestStation.MAIN_ID) -> void:
+	await _lock_action()
+	await _carry_hookah_to_prep_table_impl(station_id)
+	_unlock_action()
+
+
+func wash_hookah_and_shelve(station_id: String = GuestStation.MAIN_ID) -> void:
+	await _lock_action()
+	await _wash_hookah_and_shelve_impl(station_id)
+	_unlock_action()
+
+
+## Гости, которые закреплены за местом, но ещё не дошли до него.
+func walking_guest_ids() -> Array[String]:
+	var result: Array[String] = []
+	for station: GuestStation in _stations.values():
+		for guest_id in [station.guest_id, station.companion_id]:
+			if str(guest_id) == "":
+				continue
+			var node: Variant = _objects.get(str(guest_id))
+			if node is Friend and not (node as Friend).has_arrived:
+				result.append(str(guest_id))
+	return result
+
+
+## Страховка от «вечно идущего» гостя: ставит его на место и садит, как будто он дошёл.
+func force_seat(guest_id: String) -> bool:
+	var node: Variant = _objects.get(guest_id)
+	var route: Dictionary = _guest_routes.get(guest_id, {})
+	if not (node is Friend) or route.is_empty() or not route.has("stand_cell"):
+		return false
+	var friend := node as Friend
+	var stand: Vector2i = route["stand_cell"]
+	friend.visible = true
+	friend.stop_walking()
+	friend.place_at(Vector2(stand) + Vector2(0.5, 0.5))
+	friend.arrived.emit()
+	return true
+
+
+## Места, кальян которых забрал мыть Бэн (кальянщик их не трогает).
+var _wash_claims: Dictionary = {}
+
+
+## Бэн занимает место под мойку; false — кальянщик уже занят действием или место занято.
+func claim_wash(station_id: String) -> bool:
+	if _action_busy or _wash_claims.has(station_id):
+		return false
+	_wash_claims[station_id] = true
+	return true
+
+
+func release_wash(station_id: String) -> void:
+	_wash_claims.erase(station_id)
+
+
+## На месте стоит кальян (его нужно убрать, если гостя уже нет).
+func station_has_hookah(station_id: String) -> bool:
+	var station := _station(station_id)
+	return station != null and station.unit != null and is_object_visible(station.hookah_id)
+
+
+## Бэн убирает кальян брошенного места: забирает со стола, моет в раковине, ставит на полку.
+func buddy_wash_hookah(station_id: String) -> void:
+	var station := _station(station_id)
+	if station == null or not buddy_ready() or not station_has_hookah(station_id):
+		return
+	var unit := station.unit
+	if station.serve_cell.x >= 0 and _grid.is_cell_walkable(station.serve_cell):
+		await _buddy.job_walk(station.serve_cell)
+	if not buddy_ready() or station.unit != unit or unit == null or not is_object_visible(station.hookah_id):
+		return
+	_buddy.friend.look_toward(_object_base(station.hookah_id) - _buddy.friend.position)
+	await get_tree().create_timer(0.25).timeout
+	if station.unit != unit or not is_object_visible(station.hookah_id):
+		return
+	hide_object(station.hookah_id)
+	unit.holder = null
+	unit.at_guest = false
+	unit.warming_up = false
+	unit.station = null
+	station.unit = null
+	unit.start_fn = Callable()
+	if unit.hose != null:
+		unit.hose.show_hose(false)
+	var color := unit.color
+	var sink: Variant = _objects.get(SINK_OBJECT_ID)
+	if sink is GarageObject and buddy_ready():
+		var basin := sink as GarageObject
+		await _buddy.job_walk(basin.front_cell())
+		if buddy_ready():
+			_buddy.friend.look_toward(basin.position - _buddy.friend.position)
+			basin.set_washing(true, color)
+			await get_tree().create_timer(randf_range(WASH_MIN_SECONDS, WASH_MAX_SECONDS)).timeout
+			basin.set_washing(false)
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	if shelf is GarageObject and buddy_ready():
+		var rack := shelf as GarageObject
+		var taken := rack.taken_hookah_slots()
+		if not taken.is_empty():
+			var slot: int = taken.pick_random()
+			await _buddy.job_walk(rack.shelf_front_cell(slot))
+			await get_tree().create_timer(0.3).timeout
+			rack.put_hookah(slot, color)
+	_discard_unit(unit)
+
+
+# --- Бэн-помощник (второй кальянщик) ---
+
+const BUDDY_HIRE_ID := "friend_ben"
+
+
+## Бэн в гараже, дошёл и может работать.
+func buddy_ready() -> bool:
+	return _buddy != null and is_instance_valid(_buddy.friend) and _buddy.friend.has_arrived
+
+
+func buddy_working() -> bool:
+	return _buddy != null and _buddy.is_working()
+
+
+func buddy_begin_job() -> void:
+	if _buddy != null:
+		await _buddy.begin_job()
+
+
+func buddy_end_job() -> void:
+	if _buddy != null:
+		_buddy.end_job()
+
+
+func buddy_say(text: String, emoji: String = "") -> void:
+	if buddy_ready():
+		_buddy.friend.say(text, emoji)
+
+
+func buddy_phone(on: bool) -> void:
+	if buddy_ready():
+		_buddy.friend.set_phone(on)
+
+
+func buddy_emotion(emoji: String, seconds: float = 2.5) -> void:
+	if buddy_ready():
+		_buddy.friend.show_emotion(emoji, seconds)
+
+
+## Включает/выключает разговор с Бэном (найм): точка взаимодействия ходит за ним.
+func set_buddy_hire(on: bool) -> void:
+	if _buddy == null:
+		return
+	var data := _interactions.find_by_id(BUDDY_HIRE_ID)
+	if data == null:
+		if not on:
+			return
+		data = InteractableData.new()
+		data.id = BUDDY_HIRE_ID
+		data.display_name = "Бэн"
+		data.prompt = "Поговорить с Бэном"
+		data.dialogue_id = "ben_hire"
+		data.radius = 1.4
+		_interactions.register(data)
+	data.enabled = on
+	_buddy_hire_on = on
+	_sync_buddy_hire_rect()
+	_interactions.refocus()
+
+
+var _buddy_hire_on := false
+
+
+func _sync_buddy_hire_rect() -> void:
+	if not _buddy_hire_on or _buddy == null or not is_instance_valid(_buddy.friend):
+		return
+	var data := _interactions.find_by_id(BUDDY_HIRE_ID)
+	if data != null:
+		data.rect = Rect2(_buddy.friend.grid_position - Vector2(0.5, 0.5), Vector2.ONE)
+
+
+## Бэн меняет угли у кальяна места: идёт к лотку, меняет угли (анимация кальяна та же, что у кальянщика).
+func buddy_service_coals(seconds: float, station_id: String) -> void:
+	var station := _station(station_id)
+	if station == null or not buddy_ready():
+		return
+	var hookah: Variant = _objects.get(station.hookah_id)
+	if not (hookah is GarageObject):
+		return
+	var work_cell := station.coal_cell if station.coal_cell.x >= 0 and _grid.is_cell_walkable(station.coal_cell) else station.serve_cell
+	if work_cell.x >= 0 and _grid.is_cell_walkable(work_cell):
+		await _buddy.job_walk(work_cell)
+	if not buddy_ready():
+		return
+	_buddy.friend.look_toward((hookah as GarageObject).position - _buddy.friend.position)
+	await (hookah as GarageObject).play_coal_swap(seconds)
+
+
+## Расстояние от стола для кальянов до места гостя (чем дальше, тем охотнее кальян готовит Бэн).
+func serve_distance_from_prep(station_id: String) -> float:
+	var station := _station(station_id)
+	if station == null or station.serve_cell.x < 0 or _prep_cell.x < 0:
+		return 0.0
+	return Vector2(station.serve_cell).distance_to(Vector2(_prep_cell))
+
+
+## Бэн готовит кальян целиком по упрощённой схеме: берёт с полки, наливает колбу, забивает и ставит гостю.
+## Возвращает true, если кальян стоит на столе гостя. Кальянщика не блокирует (у Бэна свой кальян-юнит).
+func buddy_serve_hookah(station_id: String) -> bool:
+	var station := _station(station_id)
+	if station == null or not buddy_ready() or station.unit != null or not (_objects.get(station.hookah_id) is GarageObject):
+		return false
+	var color := Color.html(HookahArt.PALETTE.pick_random())
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	if shelf is GarageObject and (shelf as GarageObject).hookah_slot_count() > 0:
+		var rack := shelf as GarageObject
+		var free := rack.free_hookah_slots()
+		if free.is_empty():
+			rack.restock_hookahs()
+			free = rack.free_hookah_slots()
+		if not free.is_empty():
+			var slot: int = free.pick_random()
+			await _buddy.job_walk(rack.shelf_front_cell(slot))
+			if not buddy_ready():
+				return false
+			await get_tree().create_timer(0.3).timeout
+			color = rack.hookah_slot_color(slot)
+			rack.take_hookah(slot)
+	var sink: Variant = _objects.get(SINK_OBJECT_ID)
+	if sink is GarageObject and buddy_ready():
+		var basin := sink as GarageObject
+		await _buddy.job_walk(basin.front_cell())
+		if buddy_ready():
+			_buddy.friend.look_toward(basin.position - _buddy.friend.position)
+			basin.set_washing(true, Color(0, 0, 0, 0), "flask")
+			await get_tree().create_timer(FLASK_FILL_SECONDS).timeout
+			basin.set_washing(false)
+	var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
+	if prep is GarageObject and _prep_cell.x >= 0 and buddy_ready():
+		await _buddy.job_walk(_prep_cell)
+		if buddy_ready():
+			_buddy.friend.look_toward((prep as GarageObject).position - _buddy.friend.position)
+			await get_tree().create_timer(2.2).timeout
+	if not buddy_ready() or station.unit != null:
+		return false
+	if station.serve_cell.x >= 0 and _grid.is_cell_walkable(station.serve_cell):
+		await _buddy.job_walk(station.serve_cell)
+	if not buddy_ready() or station.unit != null:
+		return false
+	var hookah := _objects.get(station.hookah_id) as GarageObject
+	# Синхронно подменяем активный юнит (кальянщик может нести свой), чтобы не ломать его шланг.
+	var previous := _u
+	var unit := _new_unit()
+	unit.color = color
+	unit.handle_style = randi_range(0, HoseLine.HANDLE_STYLES - 1)
+	unit.hose.color = color
+	unit.hose.handle_style = unit.handle_style
+	station.unit = unit
+	unit.station = station
+	unit.at_guest = true
+	_u = unit
+	_guest_takes_mouthpiece(station)
+	_u = previous
+	_buddy.friend.look_toward(hookah.position - _buddy.friend.position)
+	hookah.set_hookah_color(color)
+	hookah.set_hookah_top(2)
+	await hookah.drop_in()
+	_hose_release_if_idle(station)
+	return true
+
+
+## Бэн идёт к коробке мундштуков, в которой их меньше всего.
+func buddy_walk_to_mouthpiece_box() -> void:
+	if not buddy_ready():
+		return
+	var table: GarageObject = null
+	for candidate in _box_tables():
+		if table == null or candidate.box_piece_count() < table.box_piece_count():
+			table = candidate
+	if table == null:
+		return
+	var box := table.mouthpiece_box_grid_position()
+	if box.x < 0.0:
+		return
+	var base := Vector2i(box.floor())
+	var best := Vector2i(-1, -1)
+	var best_dist := INF
+	var here := _buddy.friend.grid_position
+	for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, -1), Vector2i.ZERO]:
+		var cell := base + offset
+		if not _grid.is_cell_walkable(cell):
+			continue
+		var dist := Vector2(cell).distance_to(here)
+		if dist < best_dist:
+			best_dist = dist
+			best = cell
+	if best.x >= 0:
+		await _buddy.job_walk(best)
+	if buddy_ready():
+		_buddy.friend.look_toward(table.position - _buddy.friend.position)
+
+
+func service_coals(seconds: float, station_id: String = GuestStation.MAIN_ID) -> void:
+	await _lock_action()
+	await _service_coals_impl(seconds, station_id)
+	_unlock_action()
 
 
 ## Кальянщик убирает кальян после ухода гостя: забирает его со стола гостя вместе со шлангом,
 ## несёт к раковине, моет колбу и шланг 3–5 секунд (вода, брызги) и ставит обратно на полку.
 ## Корутина: завершается, когда кальян стоит на полке. Ввод на время уборки блокируется.
-func wash_hookah_and_shelve() -> void:
+func _wash_hookah_and_shelve_impl(station_id: String = GuestStation.MAIN_ID) -> void:
 	if _player == null or _grid == null:
+		return
+	var station := _station(station_id)
+	if station == null:
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
 	if _player.seated and not _sitting_busy:
 		_player.stand_up()
-	if is_object_visible(HOOKAH_OBJECT_ID):
-		await _walk_to(_serve_cell)
-		_player.face_toward(_object_base(HOOKAH_OBJECT_ID).x)
+	var unit := station.unit
+	if unit != null and is_object_visible(station.hookah_id) and not _wash_claims.has(station_id):
+		var previous := _u
+		_u = unit
+		await _walk_to(station.serve_cell)
+		_player.face_toward(_object_base(station.hookah_id).x)
 		await get_tree().create_timer(0.25).timeout
-		hide_object(HOOKAH_OBJECT_ID)
-		_hose_holder = null
-		_hose_at_guest = false
-		_warming_up = false
-		_hose.piece = _guest_piece
+		hide_object(station.hookah_id)
+		_u.holder = null
+		_u.at_guest = false
+		_u.warming_up = false
+		_u.station = null
+		station.unit = null
+		_u.hose.piece = _u.guest_piece
 		_player.set_piece_hidden(false)
 		_hose_carried()
-		_player.set_carrying_hookah(_hookah_color)
+		_player.set_carrying_hookah(_u.color)
 		_player.set_holding(true)
 		var sink: Variant = _objects.get(SINK_OBJECT_ID)
 		if sink is GarageObject:
@@ -826,10 +1419,10 @@ func wash_hookah_and_shelve() -> void:
 			_player.set_carrying(null)
 			_hose_use(func() -> Vector2: return basin.wash_valve_position(), func() -> Vector2: return _holder_end(_player),
 				func() -> Vector2: return _aim_to_mouth(_player), false, true)
-			basin.set_washing(true, _hookah_color)
+			basin.set_washing(true, _u.color)
 			await get_tree().create_timer(randf_range(WASH_MIN_SECONDS, WASH_MAX_SECONDS)).timeout
 			basin.set_washing(false)
-			_player.set_carrying_hookah(_hookah_color, 0)
+			_player.set_carrying_hookah(_u.color, 0)
 			_player.set_holding(true)
 			_hose_carried()
 		var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
@@ -840,38 +1433,56 @@ func wash_hookah_and_shelve() -> void:
 				var slot: int = taken.pick_random()
 				await _walk_to(rack.shelf_front_cell(slot))
 				await get_tree().create_timer(0.3).timeout
-				rack.put_hookah(slot, _hookah_color)
+				rack.put_hookah(slot, _u.color)
 		_player.set_carrying(null)
-	hide_object(HOOKAH_PREP_OBJECT_ID)
-	reset_hose()
+		reset_hose()
+		_discard_unit(unit)
+		_u = previous
 	set_input_locked(was_locked)
 
 
 ## true — в коробке у стола гостя меньше min_count мундштуков.
 func mouthpieces_low(min_count: int = 2) -> bool:
-	var table: Variant = _objects.get("table_guest")
-	return table is GarageObject and (table as GarageObject).box_piece_count() < min_count
+	for table in _box_tables():
+		if table.box_piece_count() < min_count:
+			return true
+	return false
 
 
-## Сколько мундштуков сейчас в коробке у стола гостя.
+## Столы гостей с коробкой мундштуков (у каждого стола своя коробка).
+func _box_tables() -> Array[GarageObject]:
+	var tables: Array[GarageObject] = []
+	for station: GuestStation in _stations.values():
+		var table: Variant = _objects.get(station.table_id)
+		if table is GarageObject and (table as GarageObject).mouthpiece_box_grid_position().x >= 0.0 and not tables.has(table):
+			tables.append(table as GarageObject)
+	return tables
+
+
+## Сколько мундштуков сейчас в коробках на всех столах гостей.
 func mouthpiece_count() -> int:
-	var table: Variant = _objects.get("table_guest")
-	return (table as GarageObject).box_piece_count() if table is GarageObject else 0
+	var total := 0
+	for table in _box_tables():
+		total += table.box_piece_count()
+	return total
 
 
-## Кальянщик подходит вплотную к коробке с мундштуками (клетка рядом, поворот к столу гостя).
+## Кальянщик подходит вплотную к коробке с мундштуками (клетка рядом, поворот к столу): к той, где их меньше всего.
 func walk_to_mouthpiece_box() -> void:
-	var table: Variant = _objects.get("table_guest")
-	if not (table is GarageObject) or _player == null or _grid == null:
+	var table: GarageObject = null
+	for candidate in _box_tables():
+		if table == null or candidate.box_piece_count() < table.box_piece_count():
+			table = candidate
+	if table == null or _player == null or _grid == null:
 		return
-	var box := (table as GarageObject).mouthpiece_box_grid_position()
+	var box := table.mouthpiece_box_grid_position()
 	if box.x < 0.0:
 		return
 	var base := Vector2i(box.floor())
 	var best := Vector2i(-1, -1)
 	var best_dist := INF
 	var here := _player.grid_position
-	for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, -1)]:
+	for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, -1), Vector2i.ZERO]:
 		var cell := base + offset
 		if not _grid.is_cell_walkable(cell):
 			continue
@@ -881,13 +1492,16 @@ func walk_to_mouthpiece_box() -> void:
 			best = cell
 	if best.x >= 0:
 		await _walk_to(best)
-	_player.face_toward((table as GarageObject).position.x)
+	_player.face_toward(table.position.x)
 
 
-## Докладывает мундштуки в коробку у стола гостя, если их там меньше min_count. true — докладывал.
+## Докладывает мундштуки во все коробки на столах гостей, где их меньше min_count. true — докладывал.
 func top_up_mouthpieces(min_count: int = 2) -> bool:
-	var table: Variant = _objects.get("table_guest")
-	return table is GarageObject and (table as GarageObject).top_up_box(min_count)
+	var topped := false
+	for table in _box_tables():
+		if table.top_up_box(min_count):
+			topped = true
+	return topped
 
 
 ## Меняет подсказку/действие/позу игрока у объекта "на лету" (например, стол с кальяном:
@@ -926,13 +1540,13 @@ func is_object_visible(object_id: String) -> bool:
 
 ## Игрок идёт к полке, берёт случайный кальян (слот пустеет), несёт к столу для кальянов и ставит его.
 ## Корутина: завершается, когда кальян стоит на столе. Ввод на время переноса блокируется.
-func fetch_random_hookah() -> void:
+func _fetch_random_hookah_impl() -> void:
 	if _player == null or _grid == null:
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
 	reset_hose()
-	_handle_style = randi_range(0, HoseLine.HANDLE_STYLES - 1)
+	_u.handle_style = randi_range(0, HoseLine.HANDLE_STYLES - 1)
 	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
 	var color := Color.html(HookahArt.PALETTE.pick_random())
 	if shelf is GarageObject and (shelf as GarageObject).hookah_slot_count() > 0:
@@ -947,7 +1561,7 @@ func fetch_random_hookah() -> void:
 		color = rack.hookah_slot_color(slot)
 		rack.take_hookah(slot)
 		GameLog.info("garage", "Кальян взят с полки: слот %d, цвет %s" % [slot, color.to_html(false)])
-	_hookah_color = color
+	_u.color = color
 	_player.set_carrying_hookah(color)
 	await get_tree().create_timer(0.2).timeout
 	await _fill_flask_at_sink()
@@ -968,17 +1582,29 @@ func _fill_flask_at_sink() -> void:
 	basin.set_washing(true, Color(0, 0, 0, 0), "flask")
 	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
 	# Колба наполнилась: вода видна в кальяне, который кальянщик держит в руках.
-	_player.set_carrying_hookah(_hookah_color, HookahArt.TOP_WATERED)
+	_player.set_carrying_hookah(_u.color, HookahArt.TOP_WATERED)
 	await get_tree().create_timer(FLASK_FILL_SECONDS * 0.5).timeout
 	basin.set_washing(false)
 
 
 ## Цвет текущего кальяна (взятого с полки).
 func hookah_color() -> Color:
-	return _hookah_color
+	return _u.color
 
 
 ## Полка заново заставляется кальянами (отладка/сброс).
+## Докупленные кальяны на полке (нижний ряд).
+func set_shelf_extra(count: int) -> void:
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	if shelf is GarageObject:
+		(shelf as GarageObject).set_extra_hookahs(count)
+
+
+func shelf_hookah_total() -> int:
+	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
+	return (shelf as GarageObject).hookah_slot_count() if shelf is GarageObject else 0
+
+
 func restock_shelf() -> void:
 	var shelf: Variant = _objects.get(SHELF_OBJECT_ID)
 	if shelf is GarageObject:
@@ -988,11 +1614,13 @@ func restock_shelf() -> void:
 ## Игрок несёт кальян к столу гостя: вставляет шланг в кальян, берёт кальян и конец шланга,
 ## идёт к точке подачи, ставит кальян на стол гостя и раскуривает.
 ## Корутина: завершается, когда кальян стоит на столе. Ввод на время переноса блокируется.
-func carry_hookah_to_guest_table() -> void:
-	if _player == null or _grid == null or not (_objects.get(HOOKAH_OBJECT_ID) is GarageObject):
+func _carry_hookah_to_guest_table_impl(station_id: String = GuestStation.MAIN_ID) -> void:
+	var station := _station(station_id)
+	if station == null or _player == null or _grid == null or not (_objects.get(station.hookah_id) is GarageObject):
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
+	_player_station = station
 	# Кальянщик может быть где угодно (например, у стола смешивания после перезабивки): сначала идёт к столу для кальянов.
 	if _prep_cell.x >= 0 and Vector2(_prep_cell).distance_to(_player.grid_position) > 1.2:
 		await _walk_to(_prep_cell)
@@ -1006,32 +1634,47 @@ func carry_hookah_to_guest_table() -> void:
 	await _warm_up_puffs(4, 6, 0.9, 1.8)
 	hide_object(HOOKAH_PREP_OBJECT_ID)
 	_hose_carried()
-	await _walk_carrying(_serve_cell)
-	await _place_hookah(HOOKAH_OBJECT_ID)
-	_guest_takes_mouthpiece()
-	_warming_up = true
+	var serve_target := _reachable_serve(station)
+	await _walk_carrying(serve_target)
+	GameLog.info("garage", "Кальян для места %s подан из клетки %s" % [station.id, str(serve_target)])
+	await _place_hookah(station.hookah_id, station)
+	_guest_takes_mouthpiece(station)
+	_u.warming_up = true
 	await _warm_up_puffs()
-	_warming_up = false
-	_hose_release_if_idle()
+	_u.warming_up = false
+	_hose_release_if_idle(station)
+	# Кальян остался у гостя (station.unit); для следующей забивки берём новый.
+	_u = _new_unit()
 	set_input_locked(was_locked)
 
 
 ## Игрок забирает кальян со стола гостя вместе со шлангом и несёт к столу для кальянов (перезабивка).
-func carry_hookah_to_prep_table() -> void:
-	if _player == null or _grid == null or not (_objects.get(HOOKAH_PREP_OBJECT_ID) is GarageObject):
+func _carry_hookah_to_prep_table_impl(station_id: String = GuestStation.MAIN_ID) -> void:
+	var station := _station(station_id)
+	if station == null or station.unit == null or _player == null or _grid == null or not (_objects.get(HOOKAH_PREP_OBJECT_ID) is GarageObject):
+		return
+	if _u.hose != null and _u.hose.shown:
+		GameLog.error("garage", "carry_hookah_to_prep_table: стол для кальянов занят другим кальяном")
 		return
 	var was_locked := _input_locked
 	set_input_locked(true)
+	_player_station = station
 	# Сначала идём к столу гостя за кальяном — кальян не телепортируется, шланг не тянется через гараж.
-	if _serve_cell.x >= 0 and Vector2(_serve_cell).distance_to(_player.grid_position) > 1.2:
-		await _walk_to(_serve_cell)
-	var guest_hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
+	if station.serve_cell.x >= 0 and Vector2(station.serve_cell).distance_to(_player.grid_position) > 1.2:
+		await _walk_to(station.serve_cell)
+	var guest_hookah: Variant = _objects.get(station.hookah_id)
 	if guest_hookah is GarageObject:
 		_player.face_toward((guest_hookah as GarageObject).position.x)
-	hide_object(HOOKAH_OBJECT_ID)
-	_hose_holder = null
-	_hose_at_guest = false
-	_hose.piece = _guest_piece
+	hide_object(station.hookah_id)
+	# Кальян гостя становится «активным» (его несут к столу для кальянов).
+	var unit := station.unit
+	station.unit = null
+	unit.station = null
+	_discard_unit(_u)
+	_u = unit
+	_u.holder = null
+	_u.at_guest = false
+	_u.hose.piece = _u.guest_piece
 	_player.set_piece_hidden(false)
 	_hose_carried()
 	await _walk_carrying(_prep_cell)
@@ -1040,22 +1683,26 @@ func carry_hookah_to_prep_table() -> void:
 
 
 ## Ставит кальян нужного цвета на стол (объект появляется с «падением»); шланг ложится рядом
-## (на столе для кальянов) или остаётся в руке игрока (на столе гостя).
-func _place_hookah(object_id: String) -> void:
+## (на столе для кальянов) или остаётся в руке игрока (на столе гостя, station != null).
+func _place_hookah(object_id: String, station: GuestStation = null) -> void:
 	var hookah: Variant = _objects.get(object_id)
 	if not (hookah is GarageObject):
 		return
 	# Кальянщик ставит кальян лицом к столу.
 	_player.face_toward((hookah as GarageObject).position.x)
-	(hookah as GarageObject).set_hookah_color(_hookah_color)
-	(hookah as GarageObject).set_hookah_top(HookahArt.TOP_WATERED if object_id == HOOKAH_PREP_OBJECT_ID else 2)
-	_hose.color = _hookah_color
-	_hose.handle_style = _handle_style
-	if object_id == HOOKAH_PREP_OBJECT_ID:
-		_hose.piece = Color(0, 0, 0, 0)
-		_hose_loose_on_prep(not _hose.shown)
+	(hookah as GarageObject).set_hookah_color(_u.color)
+	(hookah as GarageObject).set_hookah_top(HookahArt.TOP_WATERED if station == null else 2)
+	_u.hose.color = _u.color
+	_u.hose.handle_style = _u.handle_style
+	if station == null:
+		_u.hose.piece = Color(0, 0, 0, 0)
+		_hose_loose_on_prep(not _u.hose.shown)
 	else:
-		_hose_at_guest = true
+		if station.unit != null and station.unit != _u:
+			_discard_unit(station.unit)
+		station.unit = _u
+		_u.station = station
+		_u.at_guest = true
 		_hose_held_by(_player)
 	await (hookah as GarageObject).drop_in()
 
@@ -1072,40 +1719,378 @@ func _object_valve(object_id: String) -> Vector2:
 	return (node as GarageObject).hookah_valve_position() if node is GarageObject else Vector2.ZERO
 
 
+## Место по id (null — такого места сейчас нет, например второй стол ещё не собран).
+func _station(station_id: String) -> GuestStation:
+	return _stations.get(station_id) as GuestStation
+
+
+## Место, за которым сидит гость (по умолчанию основное).
+func _station_for(guest_id: String) -> GuestStation:
+	return _station(str(_guest_station.get(guest_id, GuestStation.MAIN_ID)))
+
+
+## id места гостя (чтобы Main мог убрать кальян после его ухода).
+func station_id_of(guest_id: String) -> String:
+	return str(_guest_station.get(guest_id, GuestStation.MAIN_ID))
+
+
+## Место того, кто держит/тянет шланг: гость — его место, игрок — место, где он сейчас работает.
+func _station_of_table(table_id: String) -> GuestStation:
+	for station: GuestStation in _stations.values():
+		if station.table_id == table_id:
+			return station
+	return null
+
+
+func _station_of_holder(holder: Node2D) -> GuestStation:
+	if holder is Friend:
+		return _station_for((holder as Friend).guest_id)
+	return _player_station
+
+
+# --- M12: второе место гостя (стол и стул из мебели) ---------------------------------------
+
+## Собирает или убирает дополнительные места (s2, s3) по купленным и поставленным малым столам и стульям вплотную к ним.
+## У стола может быть до двух стульев — два места со своими кальянами. Пока за местом сидит гость или стоит кальян, оно не убирается.
+func refresh_extra_station() -> void:
+	if _furniture_layer == null or _furniture_layer.system == null or _grid == null or _player == null:
+		return
+	var seats := _furniture_layer.system.find_guest_stations()
+	var wanted: Dictionary = {}
+	for seat: Dictionary in seats:
+		wanted[_station_signature(seat)] = seat
+	for station_id in GuestStation.EXTRA_IDS:
+		var existing := _station(station_id)
+		if existing == null:
+			continue
+		var signature := str(_extra_signatures.get(station_id, ""))
+		var table_alive: bool = _furniture_layer.node_of(signature.split("|")[0]) != null
+		if wanted.has(signature) and table_alive:
+			wanted.erase(signature)
+			continue
+		if table_alive and (existing.guest_id != "" or existing.companion_id != "" or existing.unit != null):
+			continue
+		_teardown_extra_station(station_id)
+	for signature in wanted:
+		var free_id := ""
+		for station_id in GuestStation.EXTRA_IDS:
+			if _station(station_id) == null:
+				free_id = station_id
+				break
+		if free_id == "":
+			break
+		_build_extra_station(free_id, wanted[signature], str(signature))
+	_ensure_main_second_seat()
+
+
+## Второе место за главным столом (стул кальянщика): собирается один раз, когда мир готов.
+func _ensure_main_second_seat() -> void:
+	if _station(GuestStation.MAIN2_ID) != null or _seat_cell.x < 0 or _player == null:
+		return
+	var table_node := _objects.get("table_guest") as GarageObject
+	if table_node == null:
+		return
+	var trect := table_node.sort_rect()
+	_build_extra_station(GuestStation.MAIN2_ID, {
+		"main": true, "table_uid": "table_guest", "chair_uid": "main_chair", "table_rect": trect,
+		"chair_cell": _seat_cell, "side": "north",
+	}, "main")
+
+
+## Стул кальянщика свободен для гостя: на нём не сидит игрок и не идёт посадка.
+func seat_cell_free() -> bool:
+	if _player == null or _player.seated or _sitting_busy:
+		return false
+	var s4 := _station(GuestStation.MAIN2_ID)
+	return s4 == null or s4.guest_id == ""
+
+
+func _station_signature(seat: Dictionary) -> String:
+	return "%s|%s|%s|%s" % [str(seat["table_uid"]), str(seat["chair_uid"]), str(seat["table_rect"]), str(seat["chair_cell"])]
+
+
+func _build_extra_station(station_id: String, seat: Dictionary, signature: String) -> void:
+	var system := _furniture_layer.system
+	var is_main := bool(seat.get("main", false))
+	var table_node: GarageObject = _objects.get("table_guest") as GarageObject if is_main else _furniture_layer.node_of(str(seat["table_uid"]))
+	if table_node == null:
+		return
+	var trect: Rect2 = seat["table_rect"]
+	var chair_cell: Vector2i = seat["chair_cell"]
+	var cover := Rect2i(Vector2i(trect.position.floor()), Vector2i(trect.size.ceil())) if is_main else system.cover_cells(trect)
+	var player_cell := Vector2i(_player.grid_position.floor())
+	# Клетки, которые нельзя брать как клетку подачи: стулья этого стола и подача других мест.
+	var blocked_cells: Array[Vector2i] = []
+	for other: Dictionary in system.find_guest_stations():
+		blocked_cells.append(other["chair_cell"])
+	for other_station: GuestStation in _stations.values():
+		blocked_cells.append(other_station.serve_cell)
+		blocked_cells.append(other_station.coal_cell)
+		blocked_cells.append(other_station.guest_cell)
+	blocked_cells.append(_seat_cell)
+	for node in _objects.values():
+		if node is GarageObject and (node as GarageObject).is_chair():
+			blocked_cells.append(Vector2i((node as GarageObject).sort_rect().position.floor()))
+	var serve := Vector2i(-1, -1)
+	var best := INF
+	for x in range(cover.position.x - 1, cover.end.x + 1):
+		for y in range(cover.position.y - 1, cover.end.y + 1):
+			var cell := Vector2i(x, y)
+			if cover.has_point(cell) or blocked_cells.has(cell):
+				continue
+			var beside_x := cell.x >= cover.position.x and cell.x < cover.end.x
+			var beside_y := cell.y >= cover.position.y and cell.y < cover.end.y
+			if not (beside_x or beside_y):
+				continue
+			if not _grid.is_cell_walkable(cell):
+				continue
+			if cell != player_cell and _grid.find_path(player_cell, cell).is_empty():
+				continue
+			var d := Vector2(cell).distance_to(Vector2(player_cell))
+			if d < best:
+				best = d
+				serve = cell
+	if serve.x < 0:
+		return
+	# К стулу гостя должен быть подход хотя бы с одной стороны.
+	var chair_reachable := false
+	for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var near: Vector2i = chair_cell + offset
+		if _grid.is_cell_walkable(near) and (near == player_cell or not _grid.find_path(player_cell, near).is_empty()):
+			chair_reachable = true
+			break
+	if not chair_reachable:
+		return
+
+	var hookah_id := "hookah_%s" % station_id
+	var table_object_id := "table_%s" % station_id
+	var lift := 26.0 if is_main else float(system.item("small_table").get("surface_height", 26.0))
+	var center := trect.get_center()
+	# Кальян стоит на своей стороне стола (ближе к своему гостю), чтобы два кальяна на одном столе не слипались.
+	var toward := Vector2(chair_cell) + Vector2(0.5, 0.5) - center
+	var anchor := center + (toward.normalized() * 0.2 if toward.length() > 0.01 else Vector2.ZERO) + Vector2(0, 0.05)
+	# Порядок отрисовки идёт по x + y: кальян должен стоять «не дальше» центра стола, иначе стол рисуется поверх него
+	# и кальян «проваливается» под столешницу.
+	var depth_shift := (anchor.x + anchor.y) - (center.x + center.y)
+	if depth_shift < 0.12:
+		anchor += Vector2.ONE * ((0.12 - depth_shift) * 0.5)
+	var hookah := GarageObject.new()
+	_entities.add_child(hookah)
+	hookah.setup({
+		"id": hookah_id, "name": "Кальян", "cell": Vector2i(center.floor()), "size": Vector2i.ONE,
+		"anchor": anchor, "blocks": false, "hidden": true, "interaction": {},
+		"visual": {"type": "hookah", "color": "#22b8ff", "lift": lift},
+	})
+	_objects[hookah_id] = hookah
+	_objects[table_object_id] = table_node
+
+	var data := InteractableData.new()
+	data.id = table_object_id
+	data.display_name = "Стол гостя"
+	data.prompt = ""
+	data.enabled = false
+	data.radius = 0.6
+	data.rect = Rect2(Vector2(serve), Vector2.ONE)
+	_interactions.register(data)
+
+	var station := GuestStation.new()
+	station.id = station_id
+	station.table_id = table_object_id
+	station.table_uid = str(seat["table_uid"])
+	station.hookah_id = hookah_id
+	station.serve_cell = serve
+	station.coal_cell = serve
+	station.guest_cell = chair_cell
+	# Гость смотрит на стол: стул справа или сверху от стола — влево, слева или снизу — вправо.
+	station.seat_faces_left = str(seat["side"]) == "east" or str(seat["side"]) == "north"
+	_stations[station.id] = station
+	_extra_signatures[station_id] = signature
+	GameLog.info("garage", "Место %s готово: стул %s, подача из %s" % [station_id, str(chair_cell), str(serve)])
+
+
+func _teardown_extra_station(station_id: String) -> void:
+	var station := _station(station_id)
+	if station != null and station.unit != null:
+		_discard_unit(station.unit)
+		station.unit = null
+	_stations.erase(station_id)
+	_interactions.unregister("table_%s" % station_id)
+	_objects.erase("table_%s" % station_id)
+	var hookah: Variant = _objects.get("hookah_%s" % station_id)
+	if hookah is Node:
+		(hookah as Node).queue_free()
+	_objects.erase("hookah_%s" % station_id)
+	if _player_station == station:
+		_player_station = _stations[GuestStation.MAIN_ID]
+	_extra_signatures.erase(station_id)
+
+
+## Есть ли готовое место с таким id (s2 появляется после покупки и расстановки стола со стулом).
+func has_station(station_id: String) -> bool:
+	return _stations.has(station_id)
+
+
+## Клетка стула гостя за местом.
+func station_guest_cell(station_id: String) -> Vector2i:
+	var station := _station(station_id)
+	return station.guest_cell if station != null and station.guest_cell.x >= 0 else Vector2i(-1, -1)
+
+
+## Поза гостя за дополнительным местом (как seat в битах истории).
+func station_seat(station_id: String) -> Dictionary:
+	var station := _station(station_id)
+	var left := station != null and station.seat_faces_left
+	return {"emoji": "🧘‍♂️", "facing": "left" if left else "right", "lift": 10}
+
+
+## id объекта (стол или гость), с которым игрок взаимодействовал в последний раз.
+func last_interacted_id() -> String:
+	return _last_interacted_id
+
+
+## id места, у стола которого игрок взаимодействовал в последний раз (для Main).
+func last_action_station_id() -> String:
+	return _last_action_station_id
+
+
+## Гость, закреплённый за местом (идёт, сидит или уходит), "" — свободно.
+func station_guest_id(station_id: String) -> String:
+	var station := _station(station_id)
+	return station.guest_id if station != null else ""
+
+
+## Гость места, который уже дошёл и сел ("" — никого нет или ещё идёт).
+func station_ready_guest(station_id: String) -> String:
+	var guest_id := station_guest_id(station_id)
+	if guest_id == "":
+		return ""
+	var node: Variant = _objects.get(guest_id)
+	return guest_id if node is Friend and (node as Friend).has_arrived else ""
+
+
+## Гость с таким id сейчас в гараже (идёт, сидит, ждёт места или уходит).
+func has_guest(guest_id: String) -> bool:
+	return _objects.get(guest_id) is Friend
+
+
+## id объекта-стола места ("" — места нет).
+func station_table_id(station_id: String) -> String:
+	var station := _station(station_id)
+	return station.table_id if station != null else ""
+
+
+## Уникальный id стола, за которым стоит место (у двух мест одного стола он совпадает).
+func station_table_uid(station_id: String) -> String:
+	var station := _station(station_id)
+	return station.table_uid if station != null else ""
+
+
+## Место, где кальянщик работает сейчас (по нему определяется, чей это кальян при затяжке игрока).
+func player_station_id() -> String:
+	return _player_station.id if _player_station != null else GuestStation.MAIN_ID
+
+
+## Место занято гостем (идущим или сидящим) или на столе стоит кальян.
+func station_busy(station_id: String) -> bool:
+	var station := _station(station_id)
+	return station != null and (station.guest_id != "" or station.companion_id != "" or station.unit != null)
+
+
+## Место придержано под спутника, который ещё не зашёл (чтобы туда не посадили другого гостя).
+func reserve_station(station_id: String) -> void:
+	var station := _station(station_id)
+	if station != null and station.companion_id == "" and station.guest_id == "":
+		station.companion_id = "pending"
+
+
+func release_station(station_id: String) -> void:
+	var station := _station(station_id)
+	if station != null and station.companion_id == "pending":
+		station.companion_id = ""
+
+
+## Гость — спутник компании (у него нет своего заказа и кальяна).
+func is_companion(guest_id: String) -> bool:
+	return _companions.has(guest_id)
+
+
+## Спутник гостя, сидящего на месте station_id ("" — гость пришёл один).
+func companion_at(station_id: String) -> String:
+	for guest_id in _companions:
+		if str(_guest_station.get(guest_id, "")) == station_id and _objects.get(guest_id) is Friend:
+			return str(guest_id)
+	return ""
+
+
+## Спутник уже дошёл и сел.
+func companion_ready(station_id: String) -> String:
+	var guest_id := companion_at(station_id)
+	var node: Variant = _objects.get(guest_id)
+	return guest_id if node is Friend and (node as Friend).has_arrived else ""
+
+
+func _new_unit() -> HookahUnit:
+	var unit := HookahUnit.new()
+	unit.hose = _make_hose()
+	_units.append(unit)
+	return unit
+
+
+## Кальян больше не нужен (убран на полку): убираем его и линию шланга.
+func _discard_unit(unit: HookahUnit) -> void:
+	if unit == null:
+		return
+	_units.erase(unit)
+	if unit.hose != null:
+		unit.hose.queue_free()
+		unit.hose = null
+
+
+func _make_hose() -> HoseLine:
+	var hose := HoseLine.new()
+	add_child(hose)
+	return hose
+
+
 func _hose_use(start_fn: Callable, end_fn: Callable, aim_fn: Callable, lying: bool, snap: bool = false) -> void:
-	_hose_start_fn = start_fn
-	_hose_end_fn = end_fn
-	_hose_aim_fn = aim_fn
-	_hose_cover_fn = Callable()
-	_hose_cover_id = ""
-	_hose_start_smooth = false
-	_hose.lying = lying
-	_hose.flat = false
+	_u.start_fn = start_fn
+	_u.end_fn = end_fn
+	_u.aim_fn = aim_fn
+	_u.cover_fn = Callable()
+	_u.cover_id = ""
+	_u.start_smooth = false
+	_u.hose.lying = lying
+	_u.hose.flat = false
 	if snap:
-		_hose.start = start_fn.call()
-		_hose.end = end_fn.call()
-	_hose.show_hose(true)
+		_u.hose.start = start_fn.call()
+		_u.hose.end = end_fn.call()
+	_u.hose.show_hose(true)
 
 
 func _update_hose(delta: float) -> void:
-	if _hose == null or not _hose.shown or not _hose_start_fn.is_valid():
+	for unit in _units:
+		_update_unit_hose(unit, delta)
+
+
+func _update_unit_hose(unit: HookahUnit, delta: float) -> void:
+	if unit.hose == null or not unit.hose.shown or not unit.start_fn.is_valid():
 		return
 	var follow := 1.0 - exp(-14.0 * delta)
-	_hose.start = _hose.start.lerp(_hose_start_fn.call(), follow) if _hose_start_smooth else _hose_start_fn.call()
-	_hose.end = _hose.end.lerp(_hose_end_fn.call(), follow)
-	_hose.cover_enabled = _hose_cover_fn.is_valid()
-	if _hose.cover_enabled:
-		_hose.cover_base = _hose_cover_fn.call()
-		_hose.cover_color = _hookah_color
-		var cover_node: Variant = _objects.get(_hose_cover_id)
-		_hose.cover_squash = (cover_node as GarageObject).hookah_squash() if cover_node is GarageObject else 0.0
-		_hose.cover_top = (cover_node as GarageObject).hookah_top() if cover_node is GarageObject else 0
-		_hose.cover_heat_state = (cover_node as GarageObject).coal_state() if cover_node is GarageObject else 1
-	if _hose_aim_fn.is_valid():
-		var aim: Vector2 = _hose_aim_fn.call()
+	unit.hose.start = unit.hose.start.lerp(unit.start_fn.call(), follow) if unit.start_smooth else unit.start_fn.call()
+	unit.hose.end = unit.hose.end.lerp(unit.end_fn.call(), follow)
+	unit.hose.cover_enabled = unit.cover_fn.is_valid()
+	if unit.hose.cover_enabled:
+		unit.hose.cover_base = unit.cover_fn.call()
+		unit.hose.cover_color = unit.color
+		var cover_node: Variant = _objects.get(unit.cover_id)
+		unit.hose.cover_squash = (cover_node as GarageObject).hookah_squash() if cover_node is GarageObject else 0.0
+		unit.hose.cover_top = (cover_node as GarageObject).hookah_top() if cover_node is GarageObject else 0
+		unit.hose.cover_heat_state = (cover_node as GarageObject).coal_state() if cover_node is GarageObject else 1
+	if unit.aim_fn.is_valid():
+		var aim: Vector2 = unit.aim_fn.call()
 		if aim != Vector2.ZERO:
-			_hose.piece_dir = aim
-	_hose.queue_redraw()
+			unit.hose.piece_dir = aim
+	unit.hose.queue_redraw()
 
 
 ## Мундштук лежит перед лицом горизонтально и смотрит кончиком в рот (назад по взгляду держащего) — никуда не поворачивается.
@@ -1125,79 +2110,111 @@ func _hose_loose_on_prep(snap: bool) -> void:
 	var base := _object_base(HOOKAH_PREP_OBJECT_ID)
 	_hose_use(func() -> Vector2: return base + PREP_HOSE_START, func() -> Vector2: return base + PREP_HOSE_END,
 		func() -> Vector2: return Vector2(-0.99, 0.1), true, snap)
-	_hose.flat = true
+	_u.hose.flat = true
 
 
 ## Кальян в руках: клапан едет с кальяном, свободный конец шланга — в руке игрока.
 func _hose_carried() -> void:
 	_hose_use(func() -> Vector2: return _player.carried_valve_position(), func() -> Vector2: return _holder_end(_player),
 		func() -> Vector2: return _aim_to_mouth(_player), false)
-	_hose_cover_fn = func() -> Vector2: return _player.carried_base_position()
-	_hose_cover_id = "carried"
+	_u.cover_fn = func() -> Vector2: return _player.carried_base_position()
+	_u.cover_id = "carried"
 
 
 ## Шланг подключён к кальяну на столе гостя, конец у holder (мундштук его собственный).
 func _hose_held_by(holder: Node2D) -> void:
-	if not _hose_at_guest or _hose_holder == holder:
+	if _u.station == null or not _u.at_guest or _u.holder == holder:
 		return
-	_hose_holder = holder
-	_set_holders_hold(holder)
+	var previous := _u.holder
+	_u.holder = holder
+	_set_holders_hold(holder, previous)
 	var master := holder == _player
-	_hose.piece = _player.piece_color() if master else Color(holder.call("piece_color"))
-	_player.set_piece_hidden(master)
-	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_OBJECT_ID), func() -> Vector2: return _holder_end(holder),
+	_u.hose.piece = _player.piece_color() if master else Color(holder.call("piece_color"))
+	if master or previous == _player:
+		_player.set_piece_hidden(master)
+	var hookah_id := _u.station.hookah_id
+	_hose_use(func() -> Vector2: return _object_valve(hookah_id), func() -> Vector2: return _holder_end(holder),
 		func() -> Vector2: return _aim_to_mouth(holder), false)
-	_hose_cover_fn = func() -> Vector2: return _object_base(HOOKAH_OBJECT_ID)
-	_hose_cover_id = HOOKAH_OBJECT_ID
+	_u.cover_fn = func() -> Vector2: return _object_base(hookah_id)
+	_u.cover_id = hookah_id
 
 
-## Рука с ручкой шланга вперёд только у того, кто держит шланг.
-func _set_holders_hold(holder: Node2D) -> void:
-	_player.set_holding(holder == _player)
+## Рука с ручкой шланга вперёд только у того, кто держит шланг (трогаем только прежнего и нового держателя —
+## другие гости и кальянщик с другим кальяном остаются как были).
+func _set_holders_hold(holder: Node2D, previous: Node2D = null) -> void:
+	if holder == _player or previous == _player:
+		_player.set_holding(holder == _player)
 	for node in _objects.values():
-		if node is Friend:
+		if node is Friend and (node == holder or node == previous):
 			(node as Friend).set_holding(holder == node)
 
 
-## Кто-то начал затяжку: берёт шланг в руку.
+## Кто-то начал затяжку: берёт шланг своего кальяна в руку.
 func _hose_take(holder: Node2D) -> void:
-	if _hose_at_guest and is_object_visible(HOOKAH_OBJECT_ID):
-		_hose_held_by(holder)
-
-
-## Никто не курит: шланг с мундштуком гостя ложится на стол, мундштук мастера возвращается на шею.
-func _hose_release_if_idle() -> void:
-	if _hose == null or not _hose_at_guest or _warming_up or _player.is_smoking():
+	var station := _station_of_holder(holder)
+	if station == null or station.unit == null:
 		return
-	for node in _objects.values():
-		if node is Friend and (node as Friend).is_smoking():
-			return
-	_hose_holder = null
-	_set_holders_hold(null)
-	_hose.piece = _guest_piece
-	_player.set_piece_hidden(false)
-	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_OBJECT_ID), func() -> Vector2: return _object_base(HOOKAH_OBJECT_ID) + Vector2(-17, 3),
-		func() -> Vector2: return Vector2(-0.9, 0.3), true)
+	# Кальянщик берёт шланг гостевого кальяна только рядом с ним (или сидя за столом): иначе затяжка у стола для кальянов
+	# «утаскивала» шланг чужого кальяна с клиентского стола.
+	if holder == _player and not _player.seated and Vector2(station.serve_cell).distance_to(_player.grid_position) > 2.5:
+		return
+	var previous := _u
+	_u = station.unit
+	if _u.at_guest and is_object_visible(station.hookah_id):
+		_hose_held_by(holder)
+	_u = previous
+
+
+## Никто не курит у кальяна: шланг с мундштуком гостя ложится на стол, мундштук мастера возвращается на шею.
+## only — только для этого места (null — для всех).
+func _hose_release_if_idle(only: GuestStation = null) -> void:
+	for station: GuestStation in _stations.values():
+		if only != null and station != only:
+			continue
+		var unit := station.unit
+		if unit == null or unit.hose == null or not unit.at_guest or unit.warming_up:
+			continue
+		if _player.is_smoking() and station == _player_station:
+			continue
+		var someone_smokes := false
+		for node in _objects.values():
+			if node is Friend and (node as Friend).is_smoking() and str(_guest_station.get((node as Friend).guest_id, GuestStation.MAIN_ID)) == station.id:
+				someone_smokes = true
+				break
+		if someone_smokes:
+			continue
+		var previous := _u
+		_u = unit
+		var holder := _u.holder
+		_u.holder = null
+		_set_holders_hold(null, holder)
+		_u.hose.piece = _u.guest_piece
+		if holder == _player:
+			_player.set_piece_hidden(false)
+		var hookah_id := station.hookah_id
+		_hose_use(func() -> Vector2: return _object_valve(hookah_id), func() -> Vector2: return _object_base(hookah_id) + Vector2(-17, 3),
+			func() -> Vector2: return Vector2(-0.9, 0.3), true)
+		_u = previous
 
 
 ## Мастер вставляет шланг в кальян: берёт конец со стола, подключает к клапану, надевает свой мундштук с шеи.
 func _insert_hose() -> void:
-	if _hose == null or not _hose.shown:
+	if _u.hose == null or not _u.hose.shown:
 		return
 	var base := _object_base(HOOKAH_PREP_OBJECT_ID)
 	_player.face_toward(base.x)
 	_player.set_holding(true)
 	_hose_use(func() -> Vector2: return base + PREP_HOSE_START, func() -> Vector2: return _holder_end(_player),
 		func() -> Vector2: return _aim_to_mouth(_player), true)
-	_hose.flat = true
+	_u.hose.flat = true
 	await get_tree().create_timer(0.6).timeout
 	_hose_use(func() -> Vector2: return _object_valve(HOOKAH_PREP_OBJECT_ID), func() -> Vector2: return _holder_end(_player),
 		func() -> Vector2: return _aim_to_mouth(_player), false)
-	_hose_cover_fn = func() -> Vector2: return _object_base(HOOKAH_PREP_OBJECT_ID)
-	_hose_cover_id = HOOKAH_PREP_OBJECT_ID
-	_hose_start_smooth = true
+	_u.cover_fn = func() -> Vector2: return _object_base(HOOKAH_PREP_OBJECT_ID)
+	_u.cover_id = HOOKAH_PREP_OBJECT_ID
+	_u.start_smooth = true
 	await get_tree().create_timer(0.7).timeout
-	_hose.piece = _player.piece_color()
+	_u.hose.piece = _player.piece_color()
 	_player.set_piece_hidden(true)
 	await get_tree().create_timer(0.4).timeout
 	_player.set_holding(false)
@@ -1205,26 +2222,37 @@ func _insert_hose() -> void:
 
 ## Сброс шланга (отладка): кальяна нет — шланга тоже.
 func reset_hose() -> void:
-	if _hose == null:
+	if _u.hose == null:
 		return
-	_hose.show_hose(false)
-	_hose_holder = null
-	_hose_at_guest = false
-	_warming_up = false
+	_u.hose.show_hose(false)
+	_u.holder = null
+	_u.at_guest = false
+	_u.warming_up = false
 	_player.set_piece_hidden(false)
 	_player.set_holding(false)
+	# Кальяны на столах гостей, которые уже убрали (отладка), забываем.
+	for station: GuestStation in _stations.values():
+		if station.unit != null and not is_object_visible(station.hookah_id):
+			var stale := station.unit
+			station.unit = null
+			stale.station = null
+			if stale != _u:
+				_discard_unit(stale)
 
 
 ## Гость берёт из коробочки случайный мундштук (он пропадает из коробки) — пока мастер раскуривает кальян.
-func _guest_takes_mouthpiece() -> void:
-	var table: Variant = _objects.get("table_guest")
+## Вызывается, пока кальян гостя — «активный» (_u).
+func _guest_takes_mouthpiece(station: GuestStation) -> void:
+	var table: Variant = _objects.get(station.table_id)
+	var piece := _u.guest_piece
 	if table is GarageObject:
-		_guest_piece = (table as GarageObject).take_box_piece()
+		piece = (table as GarageObject).take_box_piece()
+	_u.guest_piece = piece
 	for node in _objects.values():
-		if node is Friend:
-			(node as Friend).set_piece_color(_guest_piece)
-	if _hose_at_guest and _hose_holder != null and _hose_holder != _player:
-		_hose.piece = _guest_piece
+		if node is Friend and str(_guest_station.get((node as Friend).guest_id, GuestStation.MAIN_ID)) == station.id:
+			(node as Friend).set_piece_color(piece)
+	if _u.at_guest and _u.holder != null and _u.holder != _player:
+		_u.hose.piece = piece
 
 
 ## Раскурка кальянщиком: min_puffs–max_puffs коротких тяжек.
@@ -1236,13 +2264,16 @@ func _warm_up_puffs(min_puffs: int = 2, max_puffs: int = 4, min_len: float = 0.5
 
 
 ## Кальян на столе сплющивается на время затяжки (курит игрок или гость).
-func _on_inhale(duration: float) -> void:
-	var hookah: Variant = _objects.get(HOOKAH_OBJECT_ID)
-	if hookah is GarageObject and (hookah as GarageObject).visible:
-		(hookah as GarageObject).squash(duration)
-	var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
-	if prep is GarageObject and (prep as GarageObject).visible and (prep as GarageObject).hookah_top() >= 1:
-		(prep as GarageObject).squash(duration)
+func _on_inhale(duration: float, source: Node2D = null) -> void:
+	var station := _station_of_holder(source) if source != null else _player_station
+	if station != null:
+		var hookah: Variant = _objects.get(station.hookah_id)
+		if hookah is GarageObject and (hookah as GarageObject).visible:
+			(hookah as GarageObject).squash(duration)
+	if source == null:
+		var prep: Variant = _objects.get(HOOKAH_PREP_OBJECT_ID)
+		if prep is GarageObject and (prep as GarageObject).visible and (prep as GarageObject).hookah_top() >= 1:
+			(prep as GarageObject).squash(duration)
 
 
 func _walk_to(target_cell: Vector2i) -> void:
@@ -1253,8 +2284,31 @@ func _walk_to(target_cell: Vector2i) -> void:
 	await _player.auto_walk_finished
 
 
+## Клетка, откуда можно подать кальян месту: своя клетка подачи, а если до неё не дойти — ближайшая достижимая рядом.
+func _reachable_serve(station: GuestStation) -> Vector2i:
+	var origin := Vector2i(_player.grid_position.floor())
+	var serve := station.serve_cell
+	if _grid.is_cell_walkable(serve) and (serve == origin or not _grid.find_path(origin, serve).is_empty()):
+		return serve
+	GameLog.error("garage", "Клетка подачи %s места %s недоступна — ищу соседнюю" % [str(serve), station.id])
+	var best := serve
+	var best_distance := INF
+	for dx in range(-2, 3):
+		for dy in range(-2, 3):
+			var cell := serve + Vector2i(dx, dy)
+			if cell == serve or cell == station.guest_cell or not _grid.is_cell_walkable(cell):
+				continue
+			if cell != origin and _grid.find_path(origin, cell).is_empty():
+				continue
+			var distance := Vector2(cell).distance_to(Vector2(serve))
+			if distance < best_distance:
+				best_distance = distance
+				best = cell
+	return best
+
+
 func _walk_carrying(target_cell: Vector2i, top: int = 2) -> void:
-	_player.set_carrying_hookah(_hookah_color, top)
+	_player.set_carrying_hookah(_u.color, top)
 	_player.set_holding(true)
 	await _walk_to(target_cell)
 	_player.set_carrying(null)
@@ -1328,10 +2382,16 @@ func _on_friend_arrived(friend: Friend, guest: Dictionary, stand_cell: Vector2i,
 	if not seat.is_empty():
 		friend.sit(str(seat["emoji"]), str(seat["facing"]) == "left", float(seat.get("lift", 0.0)))
 	_pending_blocks.append(Rect2i(stand_cell, Vector2i.ONE))
+	if _companions.has(friend.guest_id):
+		return
 	var data := InteractableData.new()
 	data.id = str(guest["id"])
 	data.display_name = str(guest["name"])
 	data.prompt = FRIEND_TALK_PROMPT
+	# Гость без диалога (второй гость за столом): подойти и принять заказ.
+	if dialogue_id.is_empty():
+		data.prompt = "Принять заказ"
+		data.action = "take_order"
 	data.dialogue_id = dialogue_id
 	data.radius = FRIEND_TALK_RADIUS
 	data.rect = Rect2(Vector2(stand_cell), Vector2.ONE)
@@ -1374,10 +2434,15 @@ func _on_player_interacted(interactable_id: String) -> void:
 	var data := _interactions.find_by_id(interactable_id)
 	if data == null or _player.seated:
 		return
+	_last_interacted_id = interactable_id
 	if not data.dialogue_id.is_empty():
 		dialogue_requested.emit(data.dialogue_id)
 		return
-	var sits_to_smoke := data.action == "smoke_hookah" and _seat_cell.x >= 0
+	var data_station := _station_of_table(interactable_id)
+	if data_station != null:
+		_last_action_station_id = data_station.id
+		_player_station = data_station
+	var sits_to_smoke := data.action == "smoke_hookah" and data_station != null and data_station.can_player_sit() and seat_cell_free()
 	# Сообщение о курении показываем после нескольких затяжек, когда игрок уже сидит у гостя.
 	if not data.message.is_empty() and not sits_to_smoke:
 		message_requested.emit(data.message)
@@ -1396,6 +2461,7 @@ func _sit_and_smoke(source_id: String, message: String) -> void:
 	if _sitting_busy or _player.seated:
 		return
 	_sitting_busy = true
+	_player_station = _stations[GuestStation.MAIN_ID]
 	_emoji_source_id = source_id
 	if _seat_cell.x >= 0:
 		_grid.set_blocked_rect(Rect2i(_seat_cell, Vector2i.ONE), false)
@@ -1415,7 +2481,7 @@ func _sit_and_smoke(source_id: String, message: String) -> void:
 ## Камера смещается к середине между игроком и гостем (чтобы оба были в кадре).
 func _sit_focus_offset() -> Vector2:
 	for node in _objects.values():
-		if node is Friend:
+		if node is Friend and not bool((node as Friend).get_meta("waiting_guest", false)):
 			return ((node as Friend).position - _player.position) * 0.5 + Vector2(0, -14)
 	return Vector2.ZERO
 

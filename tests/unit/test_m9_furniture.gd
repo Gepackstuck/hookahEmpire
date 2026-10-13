@@ -52,6 +52,26 @@ func test_base_layout_keeps_all_work_cells_reachable() -> void:
 	state.free()
 
 
+func test_ring_is_free_sees_neighbors() -> void:
+	var state := GameStateScript.new()
+	var system := _make(state, 2000)
+	var bought := system.buy("small_table")
+	assert_true(bought["ok"])
+	var uid := str(bought["uid"])
+	var placed := false
+	for cell in [Vector2(4, 4), Vector2(6, 4), Vector2(8, 5), Vector2(10, 4)]:
+		if bool(system.place(uid, cell, 0)["ok"]):
+			placed = true
+			break
+	assert_true(placed, "стол нашёл место")
+	var rect := system.entry_rect(system.entry_of(uid))
+	# Зазор считается строго: при запасе 1.0 вплотную нельзя, а с зазором в одну клетку уже можно.
+	assert_true(not system.ring_is_free(Rect2(rect.position + Vector2(rect.size.x, 0.0), Vector2.ONE), [], 1.0, 0.0), "вплотную стол виден")
+	assert_true(system.ring_is_free(Rect2(rect.position + Vector2(rect.size.x + 1.0, 0.0), Vector2.ONE), [], 1.0, 0.0), "с зазором в клетку стол не мешает")
+	assert_true(system.ring_is_free(Rect2(rect.position + Vector2(rect.size.x, 0.0), Vector2.ONE), [uid], 1.0, 0.0), "свой стол можно игнорировать")
+	state.free()
+
+
 func test_buy_spends_money_and_stores_item() -> void:
 	var state := GameStateScript.new()
 	var system := _make(state, 100)
@@ -224,7 +244,7 @@ func test_plant_stands_on_table_and_shelf_and_falls_off_with_host() -> void:
 	var info := system.placement_info("plant", Vector2i(17, 2), 0)
 	assert_eq(str(info["problem"]), "")
 	assert_eq(str(info["host"]), table, "растение ставится на стол")
-	assert_eq(system.surface_lift(table), 20.0)
+	assert_eq(system.surface_lift(table), 26.0)
 	var plant := str(system.buy("plant")["uid"])
 	assert_true(system.place(plant, Vector2i(17, 2), 0)["ok"])
 	assert_eq(str(system.entry_of(plant)["host"]), table)
@@ -234,7 +254,7 @@ func test_plant_stands_on_table_and_shelf_and_falls_off_with_host() -> void:
 	assert_true(system.check_placement("lamp", Vector2i(17, 2), 0) != "", "торшер на стол нельзя")
 	var definition := system.object_definition(system.entry_of(plant))
 	assert_true(not bool(definition["blocks"]), "предмет на столе не блокирует пол")
-	assert_eq(float(definition["visual"]["lift"]), 20.0)
+	assert_eq(float(definition["visual"]["lift"]), 26.0)
 	assert_true(system.place(table, Vector2i(17, 5), 0)["ok"], "стол можно переставить")
 	assert_eq(system.last_detached, 2, "предметы со стола вернулись на склад")
 	assert_true(not bool(system.entry_of(plant)["placed"]))
@@ -315,4 +335,57 @@ func test_half_cell_step_placement() -> void:
 	assert_true(system.check_placement("chair", Vector2(17.5, 3.5), 0) == "", "по диагонали вплотную тоже")
 	assert_eq(system.cover_cells(system.entry_rect(system.entry_of(first))), Rect2i(16, 2, 2, 2), "для пути занято 4 клетки сетки")
 	assert_eq(system.cover_cells(Rect2(Vector2(3, 4), Vector2(2, 1))), Rect2i(3, 4, 2, 1))
+	state.free()
+
+
+func test_find_guest_station_pairs_table_and_adjacent_chair() -> void:
+	var state := GameStateScript.new()
+	var items: Array = [
+		{"id": "small_table", "price": 1, "grid_size": [2, 1], "rotation_allowed": true, "placement": "floor", "blocks": true, "visual": {"type": "table"}, "surface_height": 20},
+		{"id": "chair", "price": 1, "grid_size": [1, 1], "rotation_allowed": true, "placement": "floor", "blocks": true, "visual": {"type": "chair"}},
+	]
+	var system := _small_system(state, items, [])
+	assert_true(system.is_valid(), str(system.errors))
+	assert_true(system.find_guest_station().is_empty(), "без мебели места нет")
+	var table: Dictionary = system.buy("small_table")
+	var chair: Dictionary = system.buy("chair")
+	assert_true(bool(table["ok"]) and bool(chair["ok"]))
+	assert_true(bool(system.place(str(table["uid"]), Vector2(2, 1), 0)["ok"]), "стол поставлен")
+	assert_true(system.find_guest_station().is_empty(), "стул ещё на складе")
+	assert_true(bool(system.place(str(chair["uid"]), Vector2(0, 0), 0)["ok"]), "стул поставлен далеко")
+	assert_true(system.find_guest_station().is_empty(), "стул не рядом со столом")
+	assert_true(bool(system.place(str(chair["uid"]), Vector2(1, 1), 0)["ok"]), "стул рядом со столом")
+	var found := system.find_guest_station()
+	assert_eq(str(found["side"]), "west")
+	assert_eq(found["chair_cell"], Vector2i(1, 1))
+	assert_eq(str(found["table_uid"]), str(table["uid"]))
+	assert_eq(system.chair_facing(system.entry_of(str(chair["uid"]))), "x", "стул слева от стола спинкой от стола")
+	assert_true(system.has_seat_partner(str(chair["uid"])) and system.has_seat_partner(str(table["uid"])), "стол и стул образуют пару")
+	assert_true(bool(system.place(str(chair["uid"]), Vector2(4, 1), 0)["ok"]), "стул справа от стола")
+	assert_eq(system.chair_facing(system.entry_of(str(chair["uid"]))), "-x", "стул справа смотрит на стол")
+	assert_true(bool(system.place(str(chair["uid"]), Vector2(0, 0), 0)["ok"]), "стул уведён от стола")
+	assert_eq(system.chair_facing(system.entry_of(str(chair["uid"]))), "", "стул не у стола")
+	assert_true(not system.has_seat_partner(str(chair["uid"])), "пары нет")
+	state.free()
+
+
+func test_two_chairs_make_two_seats_at_one_table() -> void:
+	var state := GameStateScript.new()
+	var items: Array = [
+		{"id": "small_table", "price": 1, "grid_size": [1, 1], "rotation_allowed": false, "placement": "floor", "blocks": true, "visual": {"type": "table"}, "surface_height": 26},
+		{"id": "chair", "price": 1, "grid_size": [1, 1], "rotation_allowed": true, "placement": "floor", "blocks": true, "visual": {"type": "chair"}},
+	]
+	var system := _small_system(state, items, [])
+	var table: Dictionary = system.buy("small_table")
+	var left: Dictionary = system.buy("chair")
+	var right: Dictionary = system.buy("chair")
+	var third: Dictionary = system.buy("chair")
+	assert_true(bool(system.place(str(table["uid"]), Vector2(2, 1), 0)["ok"]))
+	assert_true(bool(system.place(str(left["uid"]), Vector2(1, 1), 0)["ok"]))
+	assert_eq(system.find_guest_stations().size(), 1)
+	assert_true(bool(system.place(str(right["uid"]), Vector2(3, 1), 0)["ok"]))
+	var seats := system.find_guest_stations()
+	assert_eq(seats.size(), 2, "два стула — два места")
+	assert_true(bool(system.place(str(third["uid"]), Vector2(2, 0), 0)["ok"]))
+	assert_eq(system.find_guest_stations().size(), 2, "не больше двух мест на стол")
 	state.free()

@@ -28,7 +28,7 @@
       ],
       [
         13,
-        12,
+        11,
         2,
         1
       ],
@@ -58,7 +58,7 @@
       ],
       [
         13,
-        12
+        11
       ],
       [
         15,
@@ -116,10 +116,28 @@
       "atmosphere": 1,
       "visual": {
         "type": "table",
-        "color": "#a57a4f",
-        "height": 20
+        "color": "#7a5a44",
+        "height": 26,
+        "top_extra": 15,
+        "props": [
+          {
+            "type": "napkins",
+            "at": [
+              -0.35,
+              0.18
+            ]
+          },
+          {
+            "type": "mouthpiece_box",
+            "at": [
+              0.35,
+              -0.18
+            ],
+            "pieces": 2
+          }
+        ]
       },
-      "surface_height": 20
+      "surface_height": 26.0
     },
     {
       "id": "chair",
@@ -138,7 +156,7 @@
       "atmosphere": 0,
       "visual": {
         "type": "chair",
-        "color": "#7a4f35"
+        "color": "#8a5a3c"
       }
     },
     {

@@ -4,6 +4,11 @@
   "cost_multiplier": 25,
   "coal_cost": 30,
   "mouthpiece_cost": 8,
+  "shelf_upgrades": [
+    {"price": 200, "extra": 2},
+    {"price": 300, "extra": 4},
+    {"price": 400, "extra": 6}
+  ],
   "free_ingredients": ["apple", "lemon", "lime", "vanilla", "cola"],
   "reputation": {"min": -20, "max": 100}
 }

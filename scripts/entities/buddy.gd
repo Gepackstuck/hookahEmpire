@@ -25,6 +25,10 @@ var _approach := Vector2.ZERO
 ## Объекты гаража, которые Бэн «изучает»: id -> {"cell": Vector2i (клетка перед объектом), "position": Vector2 (экранная точка объекта)}.
 var interests: Dictionary = {}
 var _last_interest := ""
+## Основной цикл (диван/прогулки) ещё выполняется.
+var _loop_alive := false
+## Бэн сейчас работает помощником кальянщика: обычное поведение приостановлено.
+var _job := false
 
 
 func setup(buddy_friend: Friend, grid: GarageGrid, player: Player, guide: IntroGuide) -> void:
@@ -89,6 +93,12 @@ func sit_immediately() -> void:
 # --- Основной цикл ---------------------------------------------------------------------------
 
 func _run() -> void:
+	_loop_alive = true
+	await _run_loop()
+	_loop_alive = false
+
+
+func _run_loop() -> void:
 	while _running and is_instance_valid(friend):
 		_interrupt = false
 		if not _has_couch:
@@ -337,3 +347,47 @@ func _unstick() -> void:
 				if _grid.is_cell_walkable(candidate):
 					friend.place_at(Vector2(candidate) + Vector2(0.5, 0.5))
 					return
+
+
+# --- Работа помощником кальянщика ---------------------------------------------------------------
+
+func is_working() -> bool:
+	return _job
+
+
+## Бэн бросает свои дела (встаёт с дивана) и готов выполнять работу. Корутина.
+func begin_job() -> void:
+	if _job:
+		return
+	_job = true
+	stop()
+	while _loop_alive and is_instance_valid(friend):
+		await get_tree().process_frame
+	if not is_instance_valid(friend):
+		return
+	friend.set_phone(false)
+	await _stand_up()
+	_unstick()
+
+
+## Идёт в клетку (корутина); false — дойти нельзя.
+func job_walk(cell: Vector2i) -> bool:
+	if not is_instance_valid(friend):
+		return false
+	if _current_cell() == cell:
+		return true
+	return await _walk_to_cell(cell)
+
+
+## Работа закончена: Бэн возвращается к обычному поведению (идёт на диван).
+func end_job() -> void:
+	if not _job:
+		return
+	_job = false
+	if is_instance_valid(friend):
+		friend.look_straight()
+		start()
+
+
+func current_cell() -> Vector2i:
+	return _current_cell()
